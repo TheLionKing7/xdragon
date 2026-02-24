@@ -17,8 +17,16 @@ func (m *openclawModel) KV(t *Tokenizer) KV {
 }
 
 func (m *openclawModel) Tensors(ts []Tensor) []*ggml.Tensor {
-	// Implement OpenClaw-specific tensor mapping here
-	return convertTensors(ts)
+	out := make([]*ggml.Tensor, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, &ggml.Tensor{
+			Name:     t.Name(),
+			Kind:     t.Kind(),
+			Shape:    t.Shape(),
+			WriterTo: t,
+		})
+	}
+	return out
 }
 
 func (m *openclawModel) Replacements() []string {

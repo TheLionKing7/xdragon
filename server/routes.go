@@ -1590,6 +1590,8 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.Use(
 		cors.New(corsConfig),
 		allowedHostsMiddleware(s.addr),
+		middleware.PanicRecovery(),
+		middleware.RequestLogger(),
 	)
 
 	// General
