@@ -265,6 +265,17 @@ export function ChatSidebar({ currentChatId }: ChatSidebarProps) {
     <nav className="flex flex-1 flex-col min-h-0 select-none">
       <header className="flex flex-col gap-0.5 px-4 pb-2">
         <Link
+          href="/playground"
+          className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm text-purple-700 hover:bg-purple-100 dark:hover:bg-purple-900 dark:text-purple-200"
+          draggable={false}
+        >
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
+            <path d="M8 12h8M12 8v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <span className="truncate font-semibold">Playground</span>
+        </Link>
+        <Link
           href="/c/new"
           mask={{ to: "/" }}
           className={`flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 dark:text-neutral-100 ${

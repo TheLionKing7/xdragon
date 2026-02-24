@@ -2339,6 +2339,7 @@ func NewCLI() *cobra.Command {
 		deleteCmd,
 		runnerCmd,
 		config.LaunchCmd(checkServerHeartbeat, runInteractiveTUI),
+		playground.NewPlaygroundCmd(),
 	)
 
 	return rootCmd

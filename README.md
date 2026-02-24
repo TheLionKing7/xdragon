@@ -138,6 +138,38 @@ const response = await ollama.chat({
 console.log(response.message.content);
 ```
 
+
+
+## Extension Points & Usage
+
+### 1. Model Integration
+
+- Add a new backend by implementing a converter in `convert/` (see `convert_openclaw.go`, `convert_nanoclaw.go`).
+- Register the architecture string in `convert.go` (e.g., `"OpenClawForCausalLM"`).
+- Ensure your model's `config.json` uses the correct architecture string.
+
+### 2. API & Client
+
+- The API is model-agnostic; new models are exposed automatically if registered.
+- Use the REST API or Python/JS clients to interact with any registered model.
+
+### 3. UI Playground
+
+- The web UI playground allows creative experimentation with all models.
+- Add new UI features in `app/ui/app/src/components/CreativePlayground.tsx`.
+- The sidebar link is in `ChatSidebar.tsx`.
+
+### 4. CLI Playground
+
+- Use `ollama playground --model <MODEL> --prompt <PROMPT>` to test any model from the terminal.
+- Extend CLI logic in `cmd/playground.go`.
+
+### 5. Documentation
+
+- Document new models and features in this README and in your model's own docs.
+
+---
+
 ## Supported backends
 
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) project founded by Georgi Gerganov.
