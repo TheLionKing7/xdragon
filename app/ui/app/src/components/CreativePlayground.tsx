@@ -1,39 +1,7 @@
-import React, { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import type { ChangeEvent } from "react";
 import { useModels } from "@/hooks/useModels";
 import { useHealth } from "@/hooks/useHealth";
-
-// ---------------------------------------------------------------------------
-// Error Boundary — self-healing: catches render crashes, shows recovery UI
-// ---------------------------------------------------------------------------
-class PlaygroundErrorBoundary extends React.Component<
-  { children: ReactNode },
-  { hasError: boolean; error: Error | null }
-> {
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error };
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="p-8 max-w-2xl mx-auto text-center">
-          <h2 className="text-xl font-bold text-red-600 mb-2">Playground Error</h2>
-          <p className="text-sm text-neutral-500 mb-4">{this.state.error?.message}</p>
-          <button
-            className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700"
-            onClick={() => this.setState({ hasError: false, error: null })}
-          >
-            Recover &amp; Retry
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Retry helper — exponential back-off with jitter
@@ -110,7 +78,7 @@ interface HistoryEntry {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-function CreativePlaygroundInner() {
+export default function CreativePlayground() {
   const { models } = useModels();
   const { isHealthy } = useHealth();
   const [selectedModel, setSelectedModel] = useState(models?.[0]?.model || "");
@@ -158,7 +126,7 @@ function CreativePlaygroundInner() {
       const data = await res.json();
       const text = data?.response ?? data?.message?.content ?? "No output";
       setOutput(text);
-      setHistory((h) => [
+      setHistory((h: HistoryEntry[]) => [
         { id: ++idCounter.current, model: selectedModel, prompt, output: text, ts: Date.now() },
         ...h.slice(0, 49), // keep last 50
       ]);
@@ -215,11 +183,12 @@ function CreativePlaygroundInner() {
               <div className="flex-1">
                 <label className="block mb-1 text-sm font-semibold">Model</label>
                 <select
+                  title="Select a model"
                   className="border rounded px-2 py-1.5 w-full dark:bg-neutral-800 dark:border-neutral-600"
                   value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
+                  onChange={(e: ChangeEvent<HTMLSelectElement>) => setSelectedModel(e.target.value)}
                 >
-                  {models?.map((m) => (
+                  {models?.map((m: { model: string }) => (
                     <option key={m.model} value={m.model}>{m.model}</option>
                   ))}
                 </select>
@@ -227,12 +196,13 @@ function CreativePlaygroundInner() {
               <div className="w-32">
                 <label className="block mb-1 text-sm font-semibold">Temp: {temperature.toFixed(1)}</label>
                 <input
+                  title="Temperature"
                   type="range"
                   min="0"
                   max="2"
                   step="0.1"
                   value={temperature}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setTemperature(parseFloat(e.target.value))}
                   className="w-full mt-2"
                 />
               </div>
@@ -299,7 +269,7 @@ function CreativePlaygroundInner() {
               <p className="text-neutral-400 text-sm">No history yet. Run a prompt to get started.</p>
             ) : (
               <div className="space-y-3">
-                {history.map((h) => (
+                {history.map((h: HistoryEntry) => (
                   <div key={h.id} className="border rounded p-3 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
                     <div className="flex items-center gap-2 text-xs text-neutral-400 mb-1">
                       <span className="font-semibold text-purple-600">{h.model}</span>
@@ -336,16 +306,5 @@ function CreativePlaygroundInner() {
         )}
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Export with error boundary wrapper
-// ---------------------------------------------------------------------------
-export default function CreativePlayground() {
-  return (
-    <PlaygroundErrorBoundary>
-      <CreativePlaygroundInner />
-    </PlaygroundErrorBoundary>
   );
 }
