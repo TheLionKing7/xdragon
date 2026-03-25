@@ -1120,10 +1120,10 @@ export default function CreativePlayground() {
 
                 <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
                   placeholder="Describe your research task..."
-                  style={{...inputStyle, minHeight:80, flexShrink:0, background: T.surface2}} />
+                  style={{...inputStyle, minHeight:80, maxHeight:150, flexShrink:0, background: T.surface2, resize:'none'}} />
                 
                 <div style={{display:'flex', gap:8, flexShrink:0}}>
-                  <button onClick={() => handleExecute()} disabled={!isHealthy||loading} style={btnStyle(true)}>▶ RESEARCH</button>
+                  <button onClick={() => handleExecute()} disabled={loading} style={btnStyle(true)}>▶ RESEARCH</button>
                   <button onClick={handleCancel} disabled={!loading} style={btnStyle()}>■ ABORT</button>
                 </div>
                 {renderOutputBlock()}
