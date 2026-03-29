@@ -421,7 +421,7 @@ export async function getInferenceCompute(): Promise<InferenceComputeResponse> {
 export async function fetchHealth(): Promise<boolean> {
   try {
     // Use the /api/version endpoint as a health check
-    const response = await fetch(`${API_BASE}/api/version`, {
+    const response = await fetch(`http://localhost:11434/api/version`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",

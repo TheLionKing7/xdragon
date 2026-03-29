@@ -1,7 +1,7 @@
 @import "tailwindcss";
-@plugin "@tailwindcss/typography";
 @import "katex/dist/katex.min.css";
 
+@plugin "@tailwindcss/typography";
 @theme {
   --font-sans: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   --font-rounded:
@@ -27,4 +27,83 @@
   30% {
     opacity: 1;
   }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   ARCHON NEXUS — Custom Scrollbars
+   Append this entire block to: xdragon/app/ui/app/src/index.css
+
+   Matches design tokens:
+     track  = #0f0f0f  (surface)
+     thumb  = #282420  (border)
+     hover  = #3a3020  (goldBorder)
+     active = #6b5820  (goldDim)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Webkit (Chrome, Edge, Brave, Electron) ─────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f0f0f;
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #282420;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3020;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: #6b5820;
+}
+
+::-webkit-scrollbar-corner {
+  background: #0f0f0f;
+}
+
+/* ── Horizontal scrollbar (tab bars, file trees) ────────────────── */
+::-webkit-scrollbar:horizontal {
+  height: 4px;
+}
+
+/* ── Firefox ────────────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #282420 #0f0f0f;
+}
+
+/* ── Monaco editor internal scrollbars ─────────────────────────── */
+.monaco-editor .scrollbar > .slider {
+  background: #282420 !important;
+  border-radius: 3px !important;
+}
+
+.monaco-editor .scrollbar > .slider:hover {
+  background: #3a3020 !important;
+}
+
+.monaco-editor .scrollbar.vertical {
+  width: 6px !important;
+}
+
+.monaco-editor .scrollbar.horizontal {
+  height: 4px !important;
+}
+
+/* ── Scrollbar invisible until hover (for panels) ───────────────── */
+.scroll-fade::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.scroll-fade:hover::-webkit-scrollbar-thumb {
+  background: #282420;
 }

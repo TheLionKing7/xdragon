@@ -64,4 +64,17 @@ export default defineConfig(() => ({
   esbuild: {
     target: "es2017",
   },
+
+  server: {
+    proxy: {
+      // Proxy Socket.IO traffic to the local Archon backend
+      // This avoids browser cross-origin WebSocket restrictions in dev
+      "/archon-socket.io": {
+        target: "http://localhost:3005",
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/archon-socket\.io/, "/socket.io"),
+      },
+    },
+  },
 }));

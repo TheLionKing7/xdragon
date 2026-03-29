@@ -1,0 +1,4 @@
+﻿src/components/GitFort.tsx(130,73): error TS6133: '_props' is declared but its value is never read.
+src/components/IntegrationCanvas.tsx(84,43): error TS6133: '_props' is declared but its value is never read.
+src/components/LegalDesk.tsx(219,50): error TS6133: '_props' is declared but its value is never read.
+src/components/ServicesModule.tsx(490,43): error TS6133: '_props' is declared but its value is never read.

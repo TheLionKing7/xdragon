@@ -1,10 +1,315 @@
 <p align="center">
-  <a href="https://ollama.com">
-    <img src="https://github.com/ollama/ollama/assets/3325447/0d0b44e2-8f4a-4e99-9b52-a5c1c741c8f7" alt="ollama" width="200"/>
-  </a>
+  <img src="https://github.com/ollama/ollama/assets/3325447/0d0b44e2-8f4a-4e99-9b52-a5c1c741c8f7" alt="xDragon" width="200"/>
 </p>
 
-# Ollama
+<h1 align="center">xDragon</h1>
+<p align="center"><em>Sovereign Local Inference Engine for the Archon Nexus Ecosystem</em></p>
+
+<p align="center">
+  <img alt="Built on Ollama" src="https://img.shields.io/badge/built%20on-Ollama-black?style=flat-square"/>
+  <img alt="Archon Integration" src="https://img.shields.io/badge/Archon-integrated-purple?style=flat-square"/>
+  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"/>
+</p>
+
+---
+
+## Overview
+
+**xDragon** is the local AI inference layer of the **Archon Nexus** sovereign intelligence platform. Built on [Ollama](https://ollama.com), xDragon extends the upstream runtime with Archon-specific orchestration hooks, task-type routing, and a memory-safe RAM management strategy — giving Archon and his Alpha S7 a private, cost-free compute substrate for every code, reasoning, and creative task.
+
+When xDragon is online, Archon routes qualifying tasks directly to it — bypassing cloud providers entirely. When xDragon is offline or overloaded, Archon's five-tier AI provider chain automatically escalates to Lightning.ai, Cerebras, OpenRouter, DeepSeek, or Groq. **Zero downtime, zero manual intervention.**
+
+---
+
+## Table of Contents
+
+1. [Role in the Archon Ecosystem](#role-in-the-archon-ecosystem)
+2. [Architecture](#architecture)
+3. [Task Routing](#task-routing)
+4. [RAM Management Strategy](#ram-management-strategy)
+5. [Daemon Integration](#daemon-integration)
+6. [Memsight Integration](#memsight-integration)
+7. [FiveClaw Integration](#fiveclaw-integration)
+8. [Quick Start](#quick-start)
+9. [Archon Configuration](#archon-configuration)
+10. [API Compatibility](#api-compatibility)
+11. [Model Recommendations](#model-recommendations)
+
+---
+
+## Role in the Archon Ecosystem
+
+```
+Archon Nexus Backend
+        │
+        ▼
+  Provider Chain (ai.js)
+  ┌─────────────────────────────────────────────────────┐
+  │  0: Lightning.ai   (priority-0, self-hosted LitServe)│
+  │  1: Cerebras       (priority-1, free tier)           │
+  │  2: OpenRouter     (priority-2, fallback)            │
+  │  3: DeepSeek       (priority-3)                      │
+  │  4: Groq           (priority-4, last resort)         │
+  └─────────────────────────────────────────────────────┘
+        │
+        ▼
+  xDragon Bridge (xdragon.js)
+  ┌─────────────────────────────────────────────────────┐
+  │  • Pings XDRAGON_BASE health endpoint               │
+  │  • Routes code/creative/reasoning/math tasks locally │
+  │  • keep_alive: 0  → model unloads after each call   │
+  │  • Returns null on failure → provider chain retries │
+  └─────────────────────────────────────────────────────┘
+        │
+        ▼
+   xDragon (Ollama Runtime)
+   - deepseek-coder:6.7b  (code tasks)
+   - qwen2.5:7b           (creative tasks)
+   - llama3.2:3b          (reasoning/math)
+```
+
+xDragon sits as a **parallel inference path** to the cloud provider chain. The Archon backend's `xdragon.js` bridge checks xDragon availability before each routable task, preferring local execution for:
+
+- **Code generation & review** (AYO's primary tool)
+- **Creative writing & narrative** (ARIA and MEI)
+- **Logical reasoning & math** (KOFI's financial models)
+
+Non-routable tasks (e.g., structured JSON extraction, sensitive compliance queries) go straight to cloud providers.
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    xDragon Node                          │
+│                                                          │
+│  ┌─────────────┐   REST API   ┌──────────────────────┐  │
+│  │ Ollama Core │◄────────────►│ Archon Backend       │  │
+│  │ (Go runtime)│  :11434      │ backend/services/    │  │
+│  └──────┬──────┘              │   xdragon.js         │  │
+│         │                     └──────────────────────┘  │
+│         ▼                                                │
+│  ┌─────────────┐              ┌──────────────────────┐  │
+│  │ Model Store │              │ Archon Local Daemon  │  │
+│  │ (GGUF/MLX)  │              │ daemon/daemon.js     │  │
+│  └─────────────┘              │ • ollama capability  │  │
+│                               │ • exposes proxy      │  │
+│                               └──────────────────────┘  │
+│                                                          │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │ Linked Memory Subsystem (optional)              │    │
+│  │ Memsight → HINDSIGHT_API_LLM_PROVIDER=ollama   │    │
+│  │ HINDSIGHT_API_LLM_BASE_URL=http://xdragon:11434 │    │
+│  └─────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Task Routing
+
+The `xdragon.js` bridge in Archon evaluates each request's task type before routing:
+
+| Task Type | Routes to xDragon | Default Model |
+|-----------|:-----------------:|---------------|
+| `code` | ✅ Yes | `deepseek-coder:6.7b` |
+| `creative` | ✅ Yes | `qwen2.5:7b` |
+| `reasoning` | ✅ Yes | `llama3.2:3b` |
+| `math` | ✅ Yes | `llama3.2:3b` |
+| `structured_json` | ❌ Cloud | — |
+| `vision` | ❌ Cloud | — |
+| `embedding` | ❌ Memsight | — |
+
+If xDragon is unreachable (health check fails), all tasks fall through to the cloud provider chain automatically.
+
+---
+
+## RAM Management Strategy
+
+xDragon uses **`keep_alive: 0`** on every API call — Ollama unloads the model from GPU/CPU RAM immediately after each inference. This is a deliberate design choice for the Archon use case:
+
+**Why `keep_alive: 0`?**
+- Alpha S7 agents are invoked on-demand (chat sessions, missions, cron jobs)
+- Tasks arrive in bursts, not steady streams
+- RAM is shared with Memsight, the Archon backend, and the daemon process
+- Prevents xDragon from monopolizing memory between tasks
+
+**Trade-off:** Cold-start latency on first call (~1–3 seconds for small models). Archon's task queue absorbs this via priority scheduling and parallel workers.
+
+---
+
+## Daemon Integration
+
+The **Archon Local Daemon** (`daemon/daemon.js`) automatically registers xDragon as an available capability when the daemon connects to the backend via WebSocket. This means:
+
+1. The Palace UI immediately reflects xDragon's availability in system status
+2. AYO (DevOps agent) can invoke `ollama pull <model>` and `ollama run <model>` through daemon shell commands
+3. Daemon exposes an xDragon proxy endpoint, allowing mission workflows to call local inference without network exposure
+4. Palace's telemetry dashboard tracks xDragon health, last-used model, and token throughput
+
+**Capability payload registered on daemon connect:**
+```json
+{
+  "capabilities": ["filesystem", "shell", "git", "system_info", "ollama"],
+  "xdragon": {
+    "base_url": "http://localhost:11434",
+    "status": "online"
+  }
+}
+```
+
+---
+
+## Memsight Integration
+
+[Memsight (Hindsight)](https://github.com/your-org/memsight) powers long-term memory for every Alpha S7 agent. When xDragon is running, Memsight can use it as its LLM backend — keeping memory operations **entirely offline**:
+
+```env
+# In Memsight .env
+HINDSIGHT_API_LLM_PROVIDER=ollama
+HINDSIGHT_API_LLM_BASE_URL=http://localhost:11434
+HINDSIGHT_API_LLM_MODEL=llama3.2:3b
+```
+
+This means fact extraction, entity resolution, and mental model synthesis happen on-device, with no API cost. The embedding model (sentence-transformers) is always local regardless.
+
+---
+
+## FiveClaw Integration
+
+[FiveClaw](https://github.com/your-org/FiveClaw) is an autonomous revenue agent registered in Archon as an MCP HTTP provider. FiveClaw's LLM backend can be pointed at xDragon:
+
+```env
+# In FiveClaw config
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=qwen2.5:7b
+```
+
+AYO can restart, retrain, and monitor FiveClaw via daemon shell commands, keeping the entire revenue loop on local compute.
+
+---
+
+## Quick Start
+
+### macOS / Linux
+
+```shell
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+### Windows
+
+```shell
+irm https://ollama.com/install.ps1 | iex
+```
+
+### Pull recommended Archon models
+
+```shell
+ollama pull deepseek-coder:6.7b   # Code tasks (AYO)
+ollama pull qwen2.5:7b            # Creative tasks (ARIA, MEI)
+ollama pull llama3.2:3b           # Reasoning/math (ARCHON, KOFI)
+```
+
+### Verify xDragon is reachable
+
+```shell
+curl http://localhost:11434/api/tags
+```
+
+---
+
+## Archon Configuration
+
+Set the following in your Archon backend `.env`:
+
+```env
+# Tell Archon where xDragon lives
+XDRAGON_URL=http://localhost:11434/api/chat
+XDRAGON_BASE=http://localhost:11434
+
+# Model assignments (optional overrides)
+XDRAGON_CODE_MODEL=deepseek-coder:6.7b
+XDRAGON_CREATIVE_MODEL=qwen2.5:7b
+XDRAGON_REASONING_MODEL=llama3.2:3b
+```
+
+When `XDRAGON_BASE` is set and returns 200 on health check, xDragon is active. Remove these vars to route all traffic to cloud providers.
+
+---
+
+## API Compatibility
+
+xDragon is **100% compatible with the Ollama REST API**. Archon's bridge uses:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/tags` | Health check / list available models |
+| `POST /api/chat` | Chat completions (streaming) |
+| `POST /api/generate` | Raw generation |
+| `POST /api/embed` | Embeddings (used by Memsight) |
+
+The xDragon bridge also respects the **OpenAI-compatible** `/v1/chat/completions` endpoint for FiveClaw and other OpenAI-SDK consumers.
+
+---
+
+## Model Recommendations
+
+| Use Case | Recommended Model | VRAM |
+|----------|-------------------|------|
+| Code generation (AYO) | `deepseek-coder:6.7b` | 4 GB |
+| Creative writing (ARIA) | `qwen2.5:7b` | 5 GB |
+| Reasoning / math (KOFI, ARCHON) | `llama3.2:3b` | 2 GB |
+| Memory LLM (Memsight) | `llama3.2:3b` | 2 GB |
+| Low-RAM mode (all tasks) | `llama3.2:1b` | 1 GB |
+| Mac MLX acceleration | `llama3.2:3b` (MLX) | Unified |
+
+With `keep_alive: 0`, only one model occupies RAM at a time — a 4 GB machine comfortably runs xDragon.
+
+---
+
+## Hyperspace Integration
+
+[Hyperspace](https://hyper.space) is a decentralized P2P AI inference network (2,000,000+ nodes) built on libp2p. AYO runs a Hyperspace node on the same machine as xDragon — the node integrates automatically with your existing Ollama installation, contributing the same GPU compute to the P2P network and earning points.
+
+```bash
+# Install Hyperspace (auto-detects existing Ollama/xDragon)
+curl -fsSL https://download.hyper.space/api/install | bash
+
+# Start contributing compute
+hyperspace start --profile full
+
+# Pull best models for your VRAM (shares with xDragon model store)
+hyperspace models pull --auto
+
+# Check status
+hyperspace status   # peers, tier, points, uptime
+```
+
+**xDragon + Hyperspace on the same machine:**
+- Both use `llama-server` / Ollama — no duplicate model downloads
+- xDragon handles Archon's private, latency-sensitive inference
+- Hyperspace contributes idle GPU cycles to the P2P network
+- `keep_alive: 0` (Archon's RAM strategy) means models unload between Archon tasks, freeing GPU for Hyperspace relay when Archon is idle
+
+---
+
+## License
+
+MIT — same as upstream Ollama.
+
+---
+
+*xDragon is a component of the [Archon Nexus](https://github.com/your-org/Archon-Nexus) sovereign AI operating system.*
+
+*"Local compute is sovereignty. Cloud compute is leverage. Use both."*
+
+---
+
+<!-- Original Ollama documentation follows for reference -->
+
+# Ollama (Upstream)
 
 Start building with open models.
 

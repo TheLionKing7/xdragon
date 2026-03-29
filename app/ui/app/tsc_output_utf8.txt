@@ -1,0 +1,15 @@
+﻿src/components/CreativePlayground.tsx(193,10): error TS6133: 'models' is declared but its value is never read.
+src/components/CreativePlayground.tsx(264,9): error TS6133: 'explorer' is declared but its value is never read.
+src/components/CreativePlayground.tsx(266,9): error TS6133: 'terminal' is declared but its value is never read.
+src/components/GitFort.tsx(130,70): error TS6133: 'onUpdateContent' is declared but its value is never read.
+src/components/GitFort.tsx(142,10): error TS6133: 'showGitHubSettings' is declared but its value is never read.
+src/components/GitFort.tsx(142,30): error TS6133: 'setShowGitHubSettings' is declared but its value is never read.
+src/components/IntegrationCanvas.tsx(84,43): error TS6133: 'onPipelineComplete' is declared but its value is never read.
+src/components/LegalDesk.tsx(219,47): error TS6133: 'onOutput' is declared but its value is never read.
+src/components/PenpotPanel.tsx(448,25): error TS2352: Conversion of type 'PenpotConfig' to type 'Record<string, string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Index signature for type 'string' is missing in type 'PenpotConfig'.
+src/components/ServicesModule.tsx(490,43): error TS6133: 'onInject' is declared but its value is never read.
+src/components/ServicesModule.tsx(883,78): error TS2352: Conversion of type '{ name: string; category: ServiceCategory; description: string; dashboardUrl: string; credentials: string[]; }' to type 'Record<string, string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'credentials' is incompatible with index signature.
+    Type 'string[]' is not comparable to type 'string'.
+src/components/ServicesPanel.tsx(83,10): error TS6133: 'tick' is declared but its value is never read.

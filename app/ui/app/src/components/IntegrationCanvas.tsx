@@ -25,9 +25,12 @@ const AGENTS: Record<string, { id: string, name: string, accent: string, role: s
 };
 
 const INFRA_CATALOG: Record<string, { color: string, items: string[] }> = {
-  'Internal Products': { color: T.goldDim, items: ['Archon Nexus', 'xDragon Studio', 'GeniePay', 'GenieChain', 'GenieID', 'Vault', 'SabiWorkAI', 'ErrandX', 'MemSight', 'xOrbit', 'DeerFlow', 'Spark Messenger'] },
-  'Cloud & Data Centers': { color: T.blue, items: ['Railway (API)', 'Railway (Worker)', 'Supabase', 'Vercel', 'Sovereign Private Cloud', 'Lagos DC-1 (Main)', 'London Node (Backup)', 'AWS us-east-1', 'GCP eu-west'] },
-  'AI & Compute': { color: T.purple, items: ['Ollama (Local)', 'MemSight API', 'xOrbit Engine', 'DeerFlow', 'OpenRouter Gateway', 'Cerebras', 'HuggingFace Hub', 'Vertex AI', 'Local GPU Cluster (H100)'] },
+  // Our products (ventures) — appear as nodes in pipeline diagrams
+  'Internal Products': { color: T.goldDim, items: ['Archon Nexus', 'xDragon Studio', 'GeniePay', 'GenieChain', 'GenieID', 'Vault', 'SabiWorkAI', 'ErrandX', 'Spark Messenger'] },
+  // Integrated ecosystem services — external projects wired into our platform
+  'Ecosystem Integrations': { color: T.orange, items: ['MemSight API', 'xOrbit Engine', 'FiveClaw Agent', 'Hyperspace Node', 'Identity Shield', 'DeerFlow'] },
+  'Cloud & Data Centers': { color: T.blue, items: ['Railway (API)', 'Railway (Worker)', 'Fly.io', 'Supabase', 'Vercel', 'Sovereign Private Cloud', 'Lagos DC-1 (Main)', 'London Node (Backup)', 'AWS us-east-1', 'GCP eu-west'] },
+  'AI & Compute': { color: T.purple, items: ['Ollama (Local)', 'Lightning.ai GPU Studio', 'OpenRouter Gateway', 'Cerebras', 'HuggingFace Hub', 'Vertex AI', 'Local GPU Cluster (H100)'] },
   'Payments': { color: T.green, items: ['Flutterwave', 'Paystack', 'Stripe', 'GeniePay Gateway', 'CBN API (NIBSS)'] },
   'Gov & Public Infra': { color: T.sage, items: ['NIN Registry (NIMC)', 'BVN Gateway (NIBSS)', 'FIRS Tax API', 'FRSC License DB', 'Customs ASYCUDA', 'SWIFT Network Node'] },
   'Institutions': { color: T.orange, items: ['Central Bank (CBN) Core', 'SEC Registry API', 'Stock Exchange (NGX)', 'CBN API (NIBSS)', 'SWIFT Network Node'] },
@@ -363,6 +366,92 @@ export default function IntegrationCanvas() {
           { id: 'c7', fromId: 'n1', toId: 'n8', color: T.purple },
           { id: 'c8', fromId: 'n1', toId: 'n9', color: T.sage },
         ]);
+
+      // ── MEMSIGHT ── Long-term memory pipeline ──────────────
+      } else if (projectId === 'memsight') {
+        setNodes([
+          { id: 'n1', type: 'infra', label: 'MemSight API',          x: 100, y: 80,  status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n2', type: 'infra', label: 'Supabase',              x: 420, y: 80,  status: 'idle', data: { category: 'Cloud & Data Centers' } },
+          { id: 'n3', type: 'infra', label: 'Archon Nexus',          x: 740, y: 80,  status: 'idle', data: { category: 'Internal Products' } },
+          { id: 'n4', type: 'infra', label: 'Identity Shield',       x: 100, y: 280, status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n5', type: 'agent', label: 'The Archon',            x: 420, y: 280, status: 'idle', data: { agentId: 'ARCHON' } },
+          { id: 'n6', type: 'infra', label: 'Ollama (Local)',        x: 740, y: 280, status: 'idle', data: { category: 'AI & Compute' } },
+          { id: 'n7', type: 'infra', label: 'xDragon Studio',        x: 420, y: 460, status: 'idle', data: { category: 'Internal Products' } },
+        ]);
+        setConnections([
+          { id: 'c1', fromId: 'n1', toId: 'n2', color: T.teal },
+          { id: 'c2', fromId: 'n1', toId: 'n3', color: T.teal },
+          { id: 'c3', fromId: 'n4', toId: 'n5', color: T.purple },
+          { id: 'c4', fromId: 'n5', toId: 'n1', color: T.gold },
+          { id: 'c5', fromId: 'n6', toId: 'n1', color: T.purple },
+          { id: 'c6', fromId: 'n5', toId: 'n7', color: T.orange },
+          { id: 'c7', fromId: 'n7', toId: 'n1', color: T.orange },
+        ]);
+
+      // ── XORBIT ── Market simulation pipeline ───────────────
+      } else if (projectId === 'xorbit') {
+        setNodes([
+          { id: 'n1', type: 'infra', label: 'Lightning.ai GPU Studio', x: 100, y: 80,  status: 'idle', data: { category: 'AI & Compute' } },
+          { id: 'n2', type: 'infra', label: 'xDragon Studio',          x: 420, y: 80,  status: 'idle', data: { category: 'Internal Products' } },
+          { id: 'n3', type: 'infra', label: 'xOrbit Engine',           x: 740, y: 80,  status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n4', type: 'infra', label: 'Cerebras',                x: 100, y: 280, status: 'idle', data: { category: 'AI & Compute' } },
+          { id: 'n5', type: 'agent', label: 'Kofi Perempe',            x: 420, y: 280, status: 'idle', data: { agentId: 'KOFI' } },
+          { id: 'n6', type: 'infra', label: 'MemSight API',            x: 740, y: 280, status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n7', type: 'infra', label: 'Archon Nexus',            x: 100, y: 460, status: 'idle', data: { category: 'Internal Products' } },
+          { id: 'n8', type: 'infra', label: 'Supabase',                x: 740, y: 460, status: 'idle', data: { category: 'Cloud & Data Centers' } },
+        ]);
+        setConnections([
+          { id: 'c1', fromId: 'n1', toId: 'n2', color: T.purple },
+          { id: 'c2', fromId: 'n2', toId: 'n3', color: T.orange },
+          { id: 'c3', fromId: 'n4', toId: 'n5', color: T.blue },
+          { id: 'c4', fromId: 'n5', toId: 'n3', color: T.gold },
+          { id: 'c5', fromId: 'n3', toId: 'n6', color: T.teal },
+          { id: 'c6', fromId: 'n7', toId: 'n5', color: T.goldDim },
+          { id: 'c7', fromId: 'n3', toId: 'n8', color: T.blue },
+        ]);
+
+      // ── FIVECLAW ── Autonomous earning pipeline ─────────────
+      } else if (projectId === 'fiveclaw') {
+        setNodes([
+          { id: 'n1', type: 'infra', label: 'MemSight API',          x: 100, y: 80,  status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n2', type: 'infra', label: 'FiveClaw Agent',        x: 420, y: 80,  status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n3', type: 'infra', label: 'Archon Nexus',          x: 740, y: 80,  status: 'idle', data: { category: 'Internal Products' } },
+          { id: 'n4', type: 'infra', label: 'Identity Shield',       x: 100, y: 280, status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n5', type: 'agent', label: 'Modebola Awolowo',      x: 420, y: 280, status: 'idle', data: { agentId: 'MODEBOLA' } },
+          { id: 'n6', type: 'infra', label: 'Hyperspace Node',       x: 740, y: 280, status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n7', type: 'infra', label: 'OpenRouter Gateway',    x: 100, y: 460, status: 'idle', data: { category: 'AI & Compute' } },
+          { id: 'n8', type: 'infra', label: 'GeniePay',              x: 740, y: 460, status: 'idle', data: { category: 'Internal Products' } },
+        ]);
+        setConnections([
+          { id: 'c1', fromId: 'n1', toId: 'n2', color: T.teal },
+          { id: 'c2', fromId: 'n2', toId: 'n3', color: T.gold },
+          { id: 'c3', fromId: 'n4', toId: 'n2', color: T.purple },
+          { id: 'c4', fromId: 'n5', toId: 'n2', color: T.purple },
+          { id: 'c5', fromId: 'n2', toId: 'n6', color: T.sage },
+          { id: 'c6', fromId: 'n7', toId: 'n2', color: T.blue },
+          { id: 'c7', fromId: 'n3', toId: 'n8', color: T.green },
+        ]);
+
+      // ── HYPERSPACE ── P2P idle-compute pipeline ─────────────
+      } else if (projectId === 'hyperspace') {
+        setNodes([
+          { id: 'n1', type: 'infra', label: 'Hyperspace Node',       x: 100, y: 80,  status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n2', type: 'infra', label: 'Lightning.ai GPU Studio', x: 420, y: 80,  status: 'idle', data: { category: 'AI & Compute' } },
+          { id: 'n3', type: 'infra', label: 'xDragon Studio',        x: 740, y: 80,  status: 'idle', data: { category: 'Internal Products' } },
+          { id: 'n4', type: 'infra', label: 'FiveClaw Agent',        x: 100, y: 280, status: 'idle', data: { category: 'Ecosystem Integrations' } },
+          { id: 'n5', type: 'agent', label: 'Ayo Hastruup',          x: 420, y: 280, status: 'idle', data: { agentId: 'AYO' } },
+          { id: 'n6', type: 'infra', label: 'Archon Nexus',          x: 740, y: 280, status: 'idle', data: { category: 'Internal Products' } },
+          { id: 'n7', type: 'infra', label: 'MemSight API',          x: 260, y: 460, status: 'idle', data: { category: 'Ecosystem Integrations' } },
+        ]);
+        setConnections([
+          { id: 'c1', fromId: 'n1', toId: 'n2', color: T.sage },
+          { id: 'c2', fromId: 'n2', toId: 'n3', color: T.orange },
+          { id: 'c3', fromId: 'n4', toId: 'n1', color: T.purple },
+          { id: 'c4', fromId: 'n5', toId: 'n3', color: T.gold },
+          { id: 'c5', fromId: 'n3', toId: 'n6', color: T.orange },
+          { id: 'c6', fromId: 'n7', toId: 'n5', color: T.teal },
+          { id: 'c7', fromId: 'n1', toId: 'n4', color: T.sage },
+        ]);
       }
     }, 50);
   };
@@ -449,11 +538,19 @@ export default function IntegrationCanvas() {
           style={{ ...mono, color: T.gold, fontSize: '0.72rem', fontWeight: 'bold', background: T.surface3, border: `1px solid ${T.goldBorder}`, padding: '4px 10px', cursor: 'pointer', outline: 'none', borderRadius: 3 }}
         >
           <option value="overall">◈ Overall</option>
+          <optgroup label="── Ventures ──">
           <option value="archon">◈ Archon Nexus</option>
           <option value="xdragon">◈ xDragon Studio</option>
           <option value="sabiwork">◈ SabiWorkAI</option>
           <option value="errandx">◈ ErrandX</option>
           <option value="geniepay">◈ GeniePay</option>
+          </optgroup>
+          <optgroup label="── Ecosystem Integrations ──">
+          <option value="memsight">◉ MemSight</option>
+          <option value="xorbit">◉ xOrbit Engine</option>
+          <option value="fiveclaw">◉ FiveClaw</option>
+          <option value="hyperspace">◉ Hyperspace Node</option>
+          </optgroup>
         </select>
         <div style={{ width: 1, height: 20, background: T.border }} />
         
