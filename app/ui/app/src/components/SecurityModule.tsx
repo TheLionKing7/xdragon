@@ -17,6 +17,12 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
+// ── Archon Nexus integration constants ────────────────────────────
+// xDragon is the execution bedrock; Archon is the palace that commands it.
+// RevPro threat blocks and supply-chain signals flow from here → Archon.
+const ARCHON_API   = (import.meta as any).env?.VITE_ARCHON_API   ?? 'https://archon-nexus-api.fly.dev';
+const REVPRO_KEY   = (import.meta as any).env?.VITE_REVPRO_KEY   ?? '';
+
 const T = {
   gold: '#c9a84c', goldDim: '#6b5820', goldBorder: '#3a3020',
   black: '#080808', surface: '#0f0f0f', surface2: '#161616', surface3: '#202020',
@@ -223,6 +229,27 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
     addLog('► Initiating Archon Security Scan...');
     addLog(`  Targets: ${targets.map(t => t.name).join(', ')}`);
 
+    // ── Pull Archon supply-chain status (sync on every full scan) ───
+    // Fires when the user manually triggers a scan — no polling loop needed.
+    if (REVPRO_KEY) {
+      fetch(`${ARCHON_API}/api/security/supply-chain/status`, {
+        headers: { 'X-RevPro-Key': REVPRO_KEY },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then((data: { floatCount: number; exposurePercent: number; compromisedCount: number } | null) => {
+          if (!data) return;
+          const supplyRisk = Math.min(Math.round(data.exposurePercent * 0.4), 40)
+            + data.compromisedCount * 15;
+          setProducts(prev => prev.map(p =>
+            p.id === 'xdragon'
+              ? { ...p, riskScore: Math.min(supplyRisk + 8, 100), lastScanned: Date.now() }
+              : p
+          ));
+          addLog(`  ◈ PinLock: ${data.floatCount} float(s) · exposure ${data.exposurePercent?.toFixed(1) ?? '?'}%`);
+        })
+        .catch(() => { /* non-blocking */ });
+    }
+
     for (let i = 0; i < targets.length; i++) {
       const p = targets[i];
       addLog(`  Scanning ${p.name}...`);
@@ -286,14 +313,28 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
       : score >= 35 ? '⚠ FLAGGED — MONITORING'
       : '✓ CLEAN — PASS THROUGH';
     setRevProLastScan({ score, threats: hits.map(h => h.label), verdict });
+
     if (hits.length > 0) {
-      setRevProThreats(prev => [{
+      const threat: RevProThreat = {
         id: uid(), ts: Date.now(), type: hits[0].type,
         severity: (score >= 85 ? 'Critical' : score >= 65 ? 'High' : 'Medium') as RiskLevel,
         pattern: hits[0].label, snippet: `"${input.substring(0, 45)}..."`,
         blocked, score,
-      }, ...prev].slice(0, 30));
+      };
+      setRevProThreats(prev => [threat, ...prev].slice(0, 30));
+
+      // ── Archon sovereign audit sink ─────────────────────────────
+      // Threats scoring >= 35 are significant enough to log in the palace.
+      // Fire-and-forget — RevPro never waits on the network.
+      if (score >= 35 && REVPRO_KEY) {
+        fetch(`${ARCHON_API}/api/security/revpro/event`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', 'X-RevPro-Key': REVPRO_KEY },
+          body:    JSON.stringify(threat),
+        }).catch(() => { /* non-blocking — local intercept works regardless */ });
+      }
     }
+
     setRevProScanning(false);
   }, [revProScanning]);
 
