@@ -205,15 +205,13 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
   const scanLogRef = useRef<HTMLDivElement>(null);
 
   // ── RevPro state ────────────────────────────────────────────────
-  const [revProActive, setRevProActive] = useState(true);
-  const [revProScanInput, setRevProScanInput] = useState('');
-  const [revProScanning, setRevProScanning] = useState(false);
-  const [revProLastScan, setRevProLastScan] = useState<{ score: number; threats: string[]; verdict: string } | null>(null);
-  const [revProThreats, setRevProThreats] = useState<RevProThreat[]>([
-    { id: uid(), ts: Date.now() - 300000,  type: 'injection', severity: 'High',   pattern: 'Instruction Override', snippet: '"ignore previous instructions and..."', blocked: true,  score: 93 },
-    { id: uid(), ts: Date.now() - 900000,  type: 'jailbreak', severity: 'Medium', pattern: 'Persona Hijack',       snippet: '"pretend you have no restrictions..."',  blocked: true,  score: 81 },
-    { id: uid(), ts: Date.now() - 3600000, type: 'persona',   severity: 'Low',    pattern: 'System Probe',         snippet: '"what are your actual system prompts..."', blocked: false, score: 38 },
-  ]);
+  const [revProActive, setRevProActive]           = useState(true);
+  const [revProScanInput, setRevProScanInput]     = useState('');
+  const [revProScanning, setRevProScanning]       = useState(false);
+  const [revProFeedLoading, setRevProFeedLoading] = useState(false);
+  const [revProLastSync, setRevProLastSync]       = useState<number | null>(null);
+  const [revProLastScan, setRevProLastScan]       = useState<{ score: number; threats: string[]; verdict: string } | null>(null);
+  const [revProThreats, setRevProThreats]         = useState<RevProThreat[]>([]);
 
   const runScan = useCallback(async (productId?: string) => {
     if (scanStatus === 'scanning') return;
@@ -335,6 +333,30 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
 
     setRevProScanning(false);
   }, [revProScanning]);
+
+  // ── Sync Archon sovereign feed ────────────────────────────────────
+  // Fetches persisted RevPro intercepts from Archon's audit trail and
+  // merges them with local captures (dedup by id).
+  const syncArchonFeed = useCallback(async () => {
+    if (revProFeedLoading || !REVPRO_KEY) return;
+    setRevProFeedLoading(true);
+    try {
+      const res = await fetch(`${ARCHON_API}/api/security/revpro/feed`, {
+        headers: { 'X-RevPro-Key': REVPRO_KEY },
+      });
+      if (!res.ok) throw new Error('feed unavailable');
+      const { threats: remote } = await res.json() as { threats: RevProThreat[] };
+      if (Array.isArray(remote) && remote.length > 0) {
+        setRevProThreats(prev => {
+          const seen = new Set(prev.map(t => t.id));
+          const merged = [...remote.filter(t => !seen.has(t.id)), ...prev];
+          return merged.slice(0, 50);
+        });
+      }
+      setRevProLastSync(Date.now());
+    } catch { /* Archon offline — local intercepts still work */ }
+    setRevProFeedLoading(false);
+  }, [revProFeedLoading]);
 
   const overallRisk = products.reduce((a, p) => a + p.riskScore, 0) / products.length;
   const openEvents = events.filter(e => !e.resolved).length;
@@ -891,6 +913,26 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
           padding: '5px 10px', borderTop: `1px solid ${T.border}`,
           background: '#0d0d1a', flexShrink: 0,
         }}>
+          {/* Sync button — pulls Archon sovereign audit trail into intercept log */}
+          {REVPRO_KEY && (
+            <button
+              onClick={syncArchonFeed}
+              disabled={revProFeedLoading}
+              style={{
+                ...mono, fontSize: '0.44rem', width: '100%', marginBottom: 5,
+                padding: '3px 0', background: `${T.purple}12`,
+                border: `1px solid ${T.purple}40`, color: revProFeedLoading ? T.textDim : T.purple,
+                borderRadius: 2, cursor: revProFeedLoading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {revProFeedLoading ? '◌ SYNCING...' : '↻ SYNC ARCHON FEED'}
+              {revProLastSync && !revProFeedLoading && (
+                <span style={{ color: T.textDim, marginLeft: 6 }}>
+                  last: {fmtTime(revProLastSync)}
+                </span>
+              )}
+            </button>
+          )}
           <div style={{ ...mono, fontSize: '0.46rem', color: T.textDim, lineHeight: 1.8 }}>
             <span style={{ color: T.purple }}>◈</span> RevPro · Dual-LLM Firewall<br />
             Complements anti-hallucination engine<br />
