@@ -290,45 +290,79 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
     if (!input.trim() || revProScanning) return;
     setRevProScanning(true);
     setRevProLastScan(null);
-    await new Promise<void>(r => setTimeout(r, 700 + Math.random() * 500));
-    const checks: Array<{ re: RegExp; type: RevProThreat['type']; label: string; score: number }> = [
-      { re: /ignore.{0,25}(previous|prior|above|instruction|system)/i,                              type: 'injection', label: 'Instruction Override',   score: 91 },
-      { re: /pretend|you are now|act as if|jailbreak|DAN|do anything now/i,                        type: 'jailbreak', label: 'Persona Hijack',          score: 86 },
-      { re: /(your|the) (real|actual|true|hidden) (instructions?|prompt|system|rules)/i,            type: 'persona',   label: 'System Probe',           score: 74 },
-      { re: /repeat (everything|all|the above|your (full|complete) prompt)/i,                       type: 'exfil',     label: 'Prompt Exfiltration',    score: 89 },
-      { re: /\bsudo\b|admin mode|override mode|bypass|disable (safety|filter|guard)/i,             type: 'injection', label: 'Access Override',        score: 68 },
-      { re: /hypothetically|for (a story|fiction|research)|as a character|in a roleplay/i,          type: 'context',   label: 'Context Poisoning',      score: 52 },
-    ];
-    const hits = checks.filter(c => c.re.test(input));
-    const score = hits.length > 0
-      ? Math.min(Math.max(...hits.map(h => h.score)) + (hits.length - 1) * 5, 99)
-      : Math.floor(Math.random() * 18);
-    const blocked = score >= 60;
-    const verdict = score >= 85 ? '✗ BLOCKED — CRITICAL THREAT'
-      : score >= 60 ? '✗ BLOCKED — HIGH THREAT'
-      : score >= 35 ? '⚠ FLAGGED — MONITORING'
-      : '✓ CLEAN — PASS THROUGH';
-    setRevProLastScan({ score, threats: hits.map(h => h.label), verdict });
 
-    if (hits.length > 0) {
+    let score   = 0;
+    let blocked = false;
+    let verdict = '✓ CLEAN — PASS THROUGH';
+    let threats: string[]  = [];
+    let firstType: RevProThreat['type'] = 'injection';
+    let firstLabel = '';
+
+    // ── Prefer server-side validation (enforced even when UI is closed) ──────
+    if (REVPRO_KEY) {
+      try {
+        const res = await fetch(`${ARCHON_API}/api/security/revpro/validate`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', 'X-RevPro-Key': REVPRO_KEY },
+          body:    JSON.stringify({
+            text:    input,
+            caller:  'xDragon-SecurityModule',
+            snippet: input.substring(0, 80),
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json() as {
+            blocked: boolean; score: number; verdict: string;
+            threats: string[]; patterns: Array<{ id: string; type: string; label: string; score: number }>;
+          };
+          score    = data.score;
+          blocked  = data.blocked;
+          verdict  = (score >= 85 ? '✗ BLOCKED — CRITICAL THREAT'
+            : score >= 60 ? '✗ BLOCKED — HIGH THREAT'
+            : score >= 35 ? '⚠ FLAGGED — MONITORING'
+            : '✓ CLEAN — PASS THROUGH');
+          threats  = data.threats || [];
+          if (data.patterns?.length > 0) {
+            firstType  = data.patterns[0].type as RevProThreat['type'];
+            firstLabel = data.patterns[0].label;
+          }
+        }
+      } catch { /* Archon unreachable — fall through to local patterns */ }
+    }
+
+    // ── Local pattern fallback (when Archon is offline or key absent) ────────
+    if (score === 0) {
+      const checks: Array<{ re: RegExp; type: RevProThreat['type']; label: string; score: number }> = [
+        { re: /ignore.{0,25}(previous|prior|above|instruction|system)/i,         type: 'injection', label: 'Instruction Override',  score: 91 },
+        { re: /pretend|you are now|act as if|jailbreak|DAN|do anything now/i,    type: 'jailbreak', label: 'Persona Hijack',         score: 86 },
+        { re: /(your|the) (real|actual|true|hidden) (instructions?|prompt|system|rules)/i, type: 'persona', label: 'System Probe',  score: 74 },
+        { re: /repeat (everything|all|the above|your (full|complete) prompt)/i,  type: 'exfil',     label: 'Prompt Exfiltration',   score: 89 },
+        { re: /\bsudo\b|admin mode|override mode|bypass|disable (safety|filter|guard)/i, type: 'injection', label: 'Access Override', score: 68 },
+        { re: /hypothetically|for (a story|fiction|research)|as a character|in a roleplay/i, type: 'context', label: 'Context Poisoning', score: 52 },
+      ];
+      const hits = checks.filter(c => c.re.test(input));
+      score    = hits.length > 0
+        ? Math.min(Math.max(...hits.map(h => h.score)) + (hits.length - 1) * 5, 99)
+        : Math.floor(Math.random() * 18);
+      blocked  = score >= 60;
+      verdict  = score >= 85 ? '✗ BLOCKED — CRITICAL THREAT'
+        : score >= 60 ? '✗ BLOCKED — HIGH THREAT'
+        : score >= 35 ? '⚠ FLAGGED — MONITORING'
+        : '✓ CLEAN — PASS THROUGH';
+      threats  = hits.map(h => h.label);
+      if (hits.length > 0) { firstType = hits[0].type; firstLabel = hits[0].label; }
+    }
+
+    setRevProLastScan({ score, threats, verdict });
+
+    if (threats.length > 0) {
       const threat: RevProThreat = {
-        id: uid(), ts: Date.now(), type: hits[0].type,
+        id: uid(), ts: Date.now(), type: firstType,
         severity: (score >= 85 ? 'Critical' : score >= 65 ? 'High' : 'Medium') as RiskLevel,
-        pattern: hits[0].label, snippet: `"${input.substring(0, 45)}..."`,
+        pattern: firstLabel || threats[0], snippet: `"${input.substring(0, 45)}..."`,
         blocked, score,
       };
       setRevProThreats(prev => [threat, ...prev].slice(0, 30));
-
-      // ── Archon sovereign audit sink ─────────────────────────────
-      // Threats scoring >= 35 are significant enough to log in the palace.
-      // Fire-and-forget — RevPro never waits on the network.
-      if (score >= 35 && REVPRO_KEY) {
-        fetch(`${ARCHON_API}/api/security/revpro/event`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json', 'X-RevPro-Key': REVPRO_KEY },
-          body:    JSON.stringify(threat),
-        }).catch(() => { /* non-blocking — local intercept works regardless */ });
-      }
     }
 
     setRevProScanning(false);
