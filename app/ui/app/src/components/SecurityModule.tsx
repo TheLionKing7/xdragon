@@ -15,7 +15,7 @@
  * ═══════════════════════════════════════════════════════════════════
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 // ── Archon Nexus integration constants ────────────────────────────
 // xDragon is the execution bedrock; Archon is the palace that commands it.
@@ -215,17 +215,15 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
     { id: uid(), ts: Date.now() - 3600000, type: 'persona',   severity: 'Low',    pattern: 'System Probe',         snippet: '"what are your actual system prompts..."', blocked: false, score: 38 },
   ]);
 
-  useEffect(() => { saveEvents(events); }, [events]);
-  useEffect(() => {
-    if (scanLogRef.current) scanLogRef.current.scrollTop = scanLogRef.current.scrollHeight;
-  }, [scanLog]);
-
   const runScan = useCallback(async (productId?: string) => {
     if (scanStatus === 'scanning') return;
     setScanStatus('scanning'); setScanLog([]); setScanProgress(0);
     const targets = productId ? products.filter(p => p.id === productId) : products;
 
-    const addLog = (msg: string) => setScanLog(prev => [...prev, `[${fmtTime(Date.now())}] ${msg}`]);
+    const addLog = (msg: string) => setScanLog(prev => {
+      requestAnimationFrame(() => { if (scanLogRef.current) scanLogRef.current.scrollTop = scanLogRef.current.scrollHeight; });
+      return [...prev, `[${fmtTime(Date.now())}] ${msg}`];
+    });
     addLog('► Initiating Archon Security Scan...');
     addLog(`  Targets: ${targets.map(t => t.name).join(', ')}`);
 
@@ -272,7 +270,7 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
           source: 'Vulnerability Scanner', message: `${p.name}: ${vulns} vulnerability(ies) found — review required`,
           resolved: false,
         };
-        setEvents(prev => [newEvent, ...prev].slice(0, 200));
+        setEvents(prev => { const next = [newEvent, ...prev].slice(0, 200); saveEvents(next); return next; });
       }
       setScanProgress(((i + 1) / targets.length) * 100);
     }
@@ -287,7 +285,7 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
   }, []);
 
   const resolveEvent = useCallback((id: string) => {
-    setEvents(prev => prev.map(e => e.id === id ? { ...e, resolved: true } : e));
+    setEvents(prev => { const next = prev.map(e => e.id === id ? { ...e, resolved: true } : e); saveEvents(next); return next; });
   }, []);
 
   const runRevProScan = useCallback(async (input: string) => {
