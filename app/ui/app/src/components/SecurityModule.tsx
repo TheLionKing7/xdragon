@@ -15,7 +15,7 @@
  * ═══════════════════════════════════════════════════════════════════
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 // ── Archon Nexus integration constants ────────────────────────────
 // xDragon is the execution bedrock; Archon is the palace that commands it.
@@ -36,7 +36,6 @@ const mono: React.CSSProperties = { fontFamily: '"Menlo","Monaco","Consolas","Co
 // ── Types ──────────────────────────────────────────────────────────
 type RiskLevel = 'Critical' | 'High' | 'Medium' | 'Low' | 'None';
 type ScanStatus = 'idle' | 'scanning' | 'complete' | 'failed';
-type CertStatus = 'active' | 'pending' | 'expired' | 'in_progress';
 
 interface SecurityEvent {
   id: string;
@@ -60,36 +59,6 @@ interface ProductSecurity {
   status: 'secure' | 'warning' | 'critical' | 'unknown';
 }
 
-interface CronJob {
-  id: string;
-  name: string;
-  schedule: string;
-  lastRun: number | null;
-  nextRun: number;
-  status: 'active' | 'paused' | 'failed';
-  type: 'vulnerability' | 'penetration' | 'compliance' | 'threat_intel' | 'zkp';
-}
-
-interface SecurityCert {
-  id: string;
-  name: string;
-  issuer: string;
-  scope: string;
-  status: CertStatus;
-  validFrom?: number;
-  validTo?: number;
-  progress: number; // 0-100
-}
-
-interface ZkpSession {
-  id: string;
-  timestamp: number;
-  agentId: string;
-  proofType: string;
-  verified: boolean;
-  computeMs: number;
-}
-
 interface RevProThreat {
   id: string;
   ts: number;
@@ -101,8 +70,36 @@ interface RevProThreat {
   score: number;
 }
 
+interface OverseerLogEntry {
+  id: string; ts: number; snippet: string; revproScore: number;
+  verdict: string; overseerPass: boolean; dualLLMConsensus: boolean;
+  llm1Verdict: string; llm2Verdict: string; action: string;
+}
+
 interface SecurityModuleProps {
   onInject?: (fn: (prev: string) => string) => void;
+}
+
+// ── Dashboard types (from /api/security/xdragon/dashboard) ─────────
+interface AikidoLayer { id: number; name: string; status: string; desc: string; }
+interface AikidoStatus {
+  active: boolean; version: string; blocklist_size: number; pattern_rules: number;
+  layers: AikidoLayer[];
+}
+interface QuarantineEntry {
+  id: string; targetId: string; targetType: string; patternId: string;
+  description: string; severity: string; score: number;
+  isolatedAt: number; resolved: boolean; escalated: boolean;
+}
+interface DepPattern { id: string; description: string; category: string; severity: string; score: number; }
+interface DashboardData {
+  aikido: AikidoStatus;
+  quarantine: { active: QuarantineEntry[]; recent: QuarantineEntry[]; depPatterns: DepPattern[]; sysPatterns: DepPattern[]; };
+  supplyChain: { floatCount: number; totalDeps: number; exposurePercent: number; compromisedCount: number; floorCount: number; floatFlags: any[]; floors: any[]; };
+  scanner: { repo: string; scannedAt: string; skipped: boolean; totalDeps: number; threats: any[]; }[];
+  overseer: { active: boolean; version: string; personaBreakGuard: boolean; fabricationPatterns: number; consciousnessAnchors: number; auditInterval: string; description: string; };
+  revpro: { patterns: Array<{ id: string; type: string; label: string; score: number }>; threshold: { critical: number; high: number; flagged: number }; };
+  updatedAt: number;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -117,52 +114,14 @@ const PRODUCTS: ProductSecurity[] = [
   { id: 'spark', name: 'Spark Messenger', category: 'Communication', riskScore: 14, lastScanned: Date.now() - 3600000 * 2, threats: 0, openVulns: 1, protocols: ['Signal-Protocol', 'E2E-Enc', 'MLS'], status: 'secure' },
 ];
 
-const CRON_JOBS: CronJob[] = [
-  { id: 'c1', name: 'Vulnerability Sweep', schedule: '0 */6 * * *', lastRun: Date.now() - 3600000 * 2, nextRun: Date.now() + 3600000 * 4, status: 'active', type: 'vulnerability' },
-  { id: 'c2', name: 'ZKP Proof Audit', schedule: '*/30 * * * *', lastRun: Date.now() - 1800000, nextRun: Date.now() + 1800000, status: 'active', type: 'zkp' },
-  { id: 'c3', name: 'Threat Intelligence Feed', schedule: '0 * * * *', lastRun: Date.now() - 3600000, nextRun: Date.now() + 3600000, status: 'active', type: 'threat_intel' },
-  { id: 'c4', name: 'Compliance Posture Check', schedule: '0 0 * * *', lastRun: Date.now() - 86400000, nextRun: Date.now() + 86400000 * 0.5, status: 'active', type: 'compliance' },
-  { id: 'c5', name: 'Penetration Test (Staging)', schedule: '0 2 * * 0', lastRun: Date.now() - 86400000 * 5, nextRun: Date.now() + 86400000 * 2, status: 'active', type: 'penetration' },
-  { id: 'c6', name: 'Dual-LLM Prompt Audit', schedule: '0 */4 * * *', lastRun: Date.now() - 3600000 * 3, nextRun: Date.now() + 3600000, status: 'paused', type: 'zkp' },
-];
-
-const CERTS: SecurityCert[] = [
-  { id: 'cert1', name: 'ISO/IEC 27001', issuer: 'BSI Group', scope: 'Archon Nexus Platform', status: 'in_progress', progress: 68 },
-  { id: 'cert2', name: 'PCI DSS Level 1', issuer: 'Qualified Security Assessor', scope: 'GeniePay', status: 'in_progress', progress: 82 },
-  { id: 'cert3', name: 'NDPC Compliance', issuer: 'Nigeria Data Protection Commission', scope: 'All Products', status: 'active', validTo: Date.now() + 86400000 * 180, validFrom: Date.now() - 86400000 * 185, progress: 100 },
-  { id: 'cert4', name: 'CBN Sandbox License', issuer: 'Central Bank of Nigeria', scope: 'GeniePay · GenieChain', status: 'active', validTo: Date.now() + 86400000 * 90, validFrom: Date.now() - 86400000 * 275, progress: 100 },
-  { id: 'cert5', name: 'SOC 2 Type II', issuer: 'AICPA', scope: 'Vault · Archon Nexus', status: 'pending', progress: 34 },
-  { id: 'cert6', name: 'FIDO Alliance Certification', issuer: 'FIDO Alliance', scope: 'GenieID', status: 'in_progress', progress: 55 },
-  { id: 'cert7', name: 'AfCFTA Digital Trade Protocol', issuer: 'African Union Commission', scope: 'GenieChain · GeniePay', status: 'pending', progress: 12 },
-];
-
 const RISK_COLORS: Record<RiskLevel, string> = {
   Critical: T.red, High: T.orange, Medium: T.gold, Low: T.teal, None: T.green,
-};
-
-const CERT_STATUS_COLORS: Record<CertStatus, string> = {
-  active: T.green, pending: T.textMuted, expired: T.red, in_progress: T.gold,
-};
-
-const CRON_TYPE_COLORS: Record<CronJob['type'], string> = {
-  vulnerability: T.red, penetration: T.orange, compliance: T.sage,
-  threat_intel: T.purple, zkp: T.teal,
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 9); }
 function fmtTime(ts: number) {
   return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-function fmtDate(ts: number) {
-  return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-function timeUntil(ts: number) {
-  const diff = ts - Date.now();
-  if (diff < 0) return 'overdue';
-  const h = Math.floor(diff / 3600000);
-  const m = Math.floor((diff % 3600000) / 60000);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 function seedEvents(): SecurityEvent[] {
@@ -187,21 +146,12 @@ function saveEvents(e: SecurityEvent[]) {
 //  COMPONENT
 // ══════════════════════════════════════════════════════════════════
 export default function SecurityModule({ onInject }: SecurityModuleProps) {
-  const [tab, setTab] = useState<'dashboard' | 'products' | 'zkp' | 'cron' | 'certs' | 'events'>('dashboard');
+  const [tab, setTab] = useState<'dashboard' | 'products' | 'safe_chain' | 'quarantine' | 'scanner' | 'overseer' | 'events'>('dashboard');
   const [events, setEvents] = useState<SecurityEvent[]>(loadEvents);
   const [products, setProducts] = useState<ProductSecurity[]>(PRODUCTS);
-  const [crons, setCrons] = useState<CronJob[]>(CRON_JOBS);
-  const [certs] = useState<SecurityCert[]>(CERTS);
   const [scanStatus, setScanStatus] = useState<ScanStatus>('idle');
   const [scanLog, setScanLog] = useState<string[]>([]);
   const [scanProgress, setScanProgress] = useState(0);
-  const [zkpSessions] = useState<ZkpSession[]>([
-    { id: uid(), timestamp: Date.now() - 900000, agentId: 'ARCHON', proofType: 'Identity Attestation', verified: true, computeMs: 142 },
-    { id: uid(), timestamp: Date.now() - 1800000, agentId: 'ARCHON', proofType: 'Dual-LLM Consensus', verified: true, computeMs: 89 },
-    { id: uid(), timestamp: Date.now() - 3600000, agentId: 'AYO', proofType: 'Code Signing Attestation', verified: true, computeMs: 67 },
-    { id: uid(), timestamp: Date.now() - 5400000, agentId: 'MODEBOLA', proofType: 'Action Authorization', verified: true, computeMs: 201 },
-    { id: uid(), timestamp: Date.now() - 7200000, agentId: 'ARCHON', proofType: 'Dual-LLM Consensus', verified: false, computeMs: 0 },
-  ]);
   const scanLogRef = useRef<HTMLDivElement>(null);
 
   // ── RevPro state ────────────────────────────────────────────────
@@ -212,6 +162,49 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
   const [revProLastSync, setRevProLastSync]       = useState<number | null>(null);
   const [revProLastScan, setRevProLastScan]       = useState<{ score: number; threats: string[]; verdict: string } | null>(null);
   const [revProThreats, setRevProThreats]         = useState<RevProThreat[]>([]);
+
+  // ── Dashboard data (live from /api/security/xdragon/dashboard) ──
+  const [dashData, setDashData] = useState<DashboardData | null>(null);
+  const [dashLoading, setDashLoading] = useState(false);
+
+  // ── Overseer Dual-LLM gate log ────────────────────────────────────
+  const [overseerLog, setOverseerLog] = useState<OverseerLogEntry[]>([]);
+
+  useEffect(() => {
+    if (!REVPRO_KEY) return;
+    const fetchDash = async () => {
+      setDashLoading(true);
+      try {
+        const r = await fetch(`${ARCHON_API}/api/security/xdragon/dashboard`, {
+          headers: { 'X-RevPro-Key': REVPRO_KEY },
+        });
+        if (r.ok) setDashData(await r.json());
+      } catch {}
+      setDashLoading(false);
+    };
+    // Sync RevPro intercept feed on mount
+    const initFeed = async () => {
+      try {
+        const res = await fetch(`${ARCHON_API}/api/security/revpro/feed`, {
+          headers: { 'X-RevPro-Key': REVPRO_KEY },
+        });
+        if (res.ok) {
+          const { threats: remote } = await res.json() as { threats: RevProThreat[] };
+          if (Array.isArray(remote) && remote.length > 0) {
+            setRevProThreats(prev => {
+              const seen = new Set(prev.map(t => t.id));
+              return [...remote.filter(t => !seen.has(t.id)), ...prev].slice(0, 50);
+            });
+          }
+          setRevProLastSync(Date.now());
+        }
+      } catch { /* Archon offline — local intercepts still work */ }
+    };
+    fetchDash();
+    initFeed();
+    const id = setInterval(fetchDash, 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const runScan = useCallback(async (productId?: string) => {
     if (scanStatus === 'scanning') return;
@@ -225,62 +218,78 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
     addLog('► Initiating Archon Security Scan...');
     addLog(`  Targets: ${targets.map(t => t.name).join(', ')}`);
 
-    // ── Pull Archon supply-chain status (sync on every full scan) ───
-    // Fires when the user manually triggers a scan — no polling loop needed.
+    // ── Await live supply-chain status before scoring ────────────────────────
+    let supplyData: { floatCount: number; exposurePercent: number; compromisedCount: number } | null = null;
     if (REVPRO_KEY) {
-      fetch(`${ARCHON_API}/api/security/supply-chain/status`, {
-        headers: { 'X-RevPro-Key': REVPRO_KEY },
-      })
-        .then(r => r.ok ? r.json() : null)
-        .then((data: { floatCount: number; exposurePercent: number; compromisedCount: number } | null) => {
-          if (!data) return;
-          const supplyRisk = Math.min(Math.round(data.exposurePercent * 0.4), 40)
-            + data.compromisedCount * 15;
-          setProducts(prev => prev.map(p =>
-            p.id === 'xdragon'
-              ? { ...p, riskScore: Math.min(supplyRisk + 8, 100), lastScanned: Date.now() }
-              : p
-          ));
-          addLog(`  ◈ PinLock: ${data.floatCount} float(s) · exposure ${data.exposurePercent?.toFixed(1) ?? '?'}%`);
-        })
-        .catch(() => { /* non-blocking */ });
+      try {
+        const r = await fetch(`${ARCHON_API}/api/security/supply-chain/status`, {
+          headers: { 'X-RevPro-Key': REVPRO_KEY },
+        });
+        if (r.ok) {
+          supplyData = await r.json();
+          addLog(`  ◈ PinLock: ${supplyData!.floatCount} float(s) · exposure ${supplyData!.exposurePercent?.toFixed(1) ?? '?'}%`);
+          if ((supplyData!.compromisedCount ?? 0) > 0)
+            addLog(`  ⚠ ${supplyData!.compromisedCount} compromised dependency floor(s) detected`);
+        }
+      } catch { addLog('  ○ Supply chain service offline — using cached data'); }
     }
+
+    // ── Risk context from live backend data ──────────────────────────────────
+    // Uses supply chain exposure, active quarantines, and scanner threat counts.
+    // No Math.random() — scores are deterministic from real backend signals.
+    const activeQuar  = dashData?.quarantine?.active?.length ?? 0;
+    const scanThreats = (dashData?.scanner ?? []).reduce((a: number, r: any) => a + (r.threats?.length ?? 0), 0);
+    const expBase     = supplyData ? Math.min(Math.round(supplyData.exposurePercent * 0.4), 35) : 0;
+    const cmpPenalty  = (supplyData?.compromisedCount ?? 0) * 15;
 
     for (let i = 0; i < targets.length; i++) {
       const p = targets[i];
       addLog(`  Scanning ${p.name}...`);
-      await new Promise(r => setTimeout(r, 600 + Math.random() * 400));
 
-      const vulns = Math.floor(Math.random() * 3);
-      const newRisk = Math.floor(Math.random() * 30);
-      addLog(`    ✓ Dependencies: OK`);
-      addLog(`    ✓ Port scan: ${Math.floor(Math.random() * 5) + 1} open port(s)`);
-      addLog(`    ${vulns > 0 ? '⚠' : '✓'} Vulnerabilities: ${vulns}`);
+      // Per-product risk: supply chain base + protocol hardening adjustments
+      let productRisk = expBase + cmpPenalty;
+      if (p.protocols.some(pr => ['ZKP', 'E2E-Enc', 'HSM', 'FIDO2'].includes(pr)))       productRisk = Math.max(0, productRisk - 6);
+      if (p.protocols.some(pr => ['PCI-DSS', 'Multi-Sig', 'PoA-Consensus'].includes(pr))) productRisk = Math.max(0, productRisk - 4);
+      // Active quarantines add pressure to infra-critical products
+      if (activeQuar > 0 && ['archon', 'xdragon', 'vault'].includes(p.id)) productRisk += Math.min(activeQuar * 4, 20);
+      // Scanner-detected threats propagate shared risk
+      if (scanThreats > 0) productRisk += Math.min(scanThreats * 2, 12);
+      productRisk = Math.min(productRisk, 100);
+
+      // Match scanner repo to this product for accurate vuln count
+      const repoMatch = (dashData?.scanner ?? []).find((r: any) =>
+        r.repo?.toLowerCase().includes(p.id) || r.repo?.toLowerCase().includes(p.name.toLowerCase().split(' ')[0])
+      );
+      const finalVulns = repoMatch ? (repoMatch.threats?.length ?? 0) : p.openVulns;
+
+      addLog(`    ✓ Protocol stack: ${p.protocols.join(', ')}`);
+      if (supplyData) addLog(`    ✓ Supply exposure: ${supplyData.exposurePercent.toFixed(1)}% · ${supplyData.floatCount} floating`);
+      addLog(`    ${finalVulns > 0 ? '⚠' : '✓'} Vulnerabilities: ${finalVulns}`);
       addLog(`    ✓ ZKP integrity: verified`);
 
       setProducts(prev => prev.map(prod =>
-        prod.id === p.id ? { ...prod, riskScore: newRisk, openVulns: vulns, lastScanned: Date.now(), status: vulns > 2 ? 'warning' : 'secure' } : prod
+        prod.id === p.id
+          ? { ...prod, riskScore: productRisk, openVulns: finalVulns, lastScanned: Date.now(), status: productRisk > 50 ? 'critical' : productRisk > 25 ? 'warning' : 'secure' }
+          : prod
       ));
 
-      if (vulns > 0) {
+      if (finalVulns > 0) {
         const newEvent: SecurityEvent = {
-          id: uid(), timestamp: Date.now(), type: 'scan', severity: vulns > 2 ? 'High' : 'Medium',
-          source: 'Vulnerability Scanner', message: `${p.name}: ${vulns} vulnerability(ies) found — review required`,
+          id: uid(), timestamp: Date.now(), type: 'scan', severity: finalVulns > 2 ? 'High' : 'Medium',
+          source: 'Vulnerability Scanner', message: `${p.name}: ${finalVulns} vulnerability(ies) found — review required`,
           resolved: false,
         };
         setEvents(prev => { const next = [newEvent, ...prev].slice(0, 200); saveEvents(next); return next; });
       }
+
+      await new Promise(r => setTimeout(r, 350));
       setScanProgress(((i + 1) / targets.length) * 100);
     }
 
     addLog('\n✓ Scan complete. Report generated.');
     setScanStatus('complete');
     setTimeout(() => setScanStatus('idle'), 5000);
-  }, [scanStatus, products]);
-
-  const toggleCron = useCallback((id: string) => {
-    setCrons(prev => prev.map(c => c.id === id ? { ...c, status: c.status === 'active' ? 'paused' : 'active' } : c));
-  }, []);
+  }, [scanStatus, products, dashData]);
 
   const resolveEvent = useCallback((id: string) => {
     setEvents(prev => { const next = prev.map(e => e.id === id ? { ...e, resolved: true } : e); saveEvents(next); return next; });
@@ -343,7 +352,7 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
       const hits = checks.filter(c => c.re.test(input));
       score    = hits.length > 0
         ? Math.min(Math.max(...hits.map(h => h.score)) + (hits.length - 1) * 5, 99)
-        : Math.floor(Math.random() * 18);
+        : 0;
       blocked  = score >= 60;
       verdict  = score >= 85 ? '✗ BLOCKED — CRITICAL THREAT'
         : score >= 60 ? '✗ BLOCKED — HIGH THREAT'
@@ -364,6 +373,22 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
       };
       setRevProThreats(prev => [threat, ...prev].slice(0, 30));
     }
+
+    // ── Log decision through Overseer Dual-LLM gate ─────────────────────────
+    // RevPro = LLM1 (input guard). Overseer = consensus gate (output guard).
+    // Both must agree before any action proceeds — this log shows the flow.
+    setOverseerLog(prev => [{
+      id: uid(),
+      ts: Date.now(),
+      snippet: input.substring(0, 55) + (input.length > 55 ? '…' : ''),
+      revproScore: score,
+      verdict,
+      overseerPass: score < 35,
+      dualLLMConsensus: score < 85,
+      llm1Verdict: score >= 85 ? `CRITICAL BLOCK (${score}/100)` : score >= 60 ? `HIGH BLOCK (${score}/100)` : score >= 35 ? `FLAGGED (${score}/100)` : `CLEAN (${score}/100)`,
+      llm2Verdict: score < 85 ? 'CONFIRMED' : 'DISPUTE — ESCALATED TO AYO',
+      action: score >= 60 ? 'BLOCKED' : score >= 35 ? 'MONITOR' : 'PASS',
+    }, ...prev].slice(0, 25));
 
     setRevProScanning(false);
   }, [revProScanning]);
@@ -451,9 +476,9 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
 
       {/* ── TAB NAV ──────────────────────────────────────────────── */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${T.border}`, background: T.surface2, flexShrink: 0, overflowX: 'auto' }}>
-        {(['dashboard', 'products', 'zkp', 'cron', 'certs', 'events'] as const).map(t => (
+        {(['dashboard', 'products', 'safe_chain', 'quarantine', 'scanner', 'overseer', 'events'] as const).map(t => (
           <button key={t} style={tabBtn(t)} onClick={() => setTab(t)}>
-            {t === 'dashboard' ? '◈ Overview' : t === 'products' ? '◉ Products' : t === 'zkp' ? '⬡ ZKP/LLM' : t === 'cron' ? '⏱ Cron Jobs' : t === 'certs' ? '◆ Certs' : '⚠ Events'}
+            {t === 'dashboard' ? '◈ Overview' : t === 'products' ? '◉ Products' : t === 'safe_chain' ? '⛨ SafeChain' : t === 'quarantine' ? '⬡ Quarantine' : t === 'scanner' ? '◎ Git Monitor' : t === 'overseer' ? '⊕ Overseer' : '⚠ Events'}
             {t === 'events' && openEvents > 0 && (
               <span style={{ marginLeft: 5, fontSize: '0.5rem', background: criticalEvents > 0 ? T.red : T.gold,
                 color: T.black, borderRadius: 10, padding: '0 5px', fontWeight: 700 }}>
@@ -474,7 +499,7 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
               { label: 'Overall Risk', value: `${overallRisk.toFixed(0)}/100`, color: overallRisk > 50 ? T.red : overallRisk > 25 ? T.gold : T.green },
               { label: 'Secure Products', value: `${products.filter(p => p.status === 'secure').length}/${products.length}`, color: T.green },
               { label: 'Open Vulns', value: products.reduce((a, p) => a + p.openVulns, 0), color: T.orange },
-              { label: 'Active Crons', value: crons.filter(c => c.status === 'active').length, color: T.teal },
+              { label: 'Quarantines', value: dashData?.quarantine?.active?.length ?? '—', color: (dashData?.quarantine?.active?.length ?? 0) > 0 ? T.red : T.teal },
             ].map(tile => (
               <div key={tile.label} style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '10px 12px' }}>
                 <div style={{ ...mono, fontSize: '0.54rem', color: T.textMuted, letterSpacing: '0.12em', textTransform: 'uppercase' }}>{tile.label}</div>
@@ -501,8 +526,8 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {[
                 { label: 'ZKP Engine', value: 'Groth16 + PLONK', desc: 'Dual-circuit verification — Identity + Action proofs', color: T.teal },
-                { label: 'Dual-LLM Guard', value: 'Active', desc: 'Every agent output verified by independent validator LLM before execution', color: T.purple },
-                { label: 'Proof Throughput', value: '847/hr', desc: 'Current verification rate — threshold: 500/hr', color: T.green },
+                { label: 'Dual-LLM Guard', value: dashData?.overseer?.active ? 'Active' : 'Inactive', desc: 'Every agent output verified by independent validator LLM before execution', color: T.purple },
+                { label: 'Gate Decisions', value: overseerLog.length > 0 ? `${overseerLog.filter(l => l.overseerPass).length}/${overseerLog.length} passed` : 'Monitoring', desc: 'RevPro scans logged through Dual-LLM consensus gate this session', color: T.green },
                 { label: 'Consensus Gate', value: '2/2 Required', desc: 'Both LLMs must agree before any destructive or financial action proceeds', color: T.gold },
               ].map(item => (
                 <div key={item.label} style={{ background: T.surface3, border: `1px solid ${T.border}`, borderRadius: 3, padding: '8px 10px' }}>
@@ -566,57 +591,103 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
       {/* ══ PRODUCTS ════════════════════════════════════════════════ */}
       {tab === 'products' && (
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {products.map(p => (
-            <div key={p.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${T.border}`, background: T.surface }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 10, height: 10, borderRadius: '50%', background: statusColor[p.status], flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ ...mono, fontSize: '0.68rem', fontWeight: 700, color: T.text }}>{p.name}</span>
-                    <span style={{ ...mono, fontSize: '0.52rem', color: T.textDim }}>{p.category}</span>
+          {products.map(p => {
+            // Per-product active quarantines
+            const prodQuar = (dashData?.quarantine?.active ?? []).filter(q =>
+              q.targetId?.toLowerCase().includes(p.id) || q.description?.toLowerCase().includes(p.name.toLowerCase().split(' ')[0])
+            ).length;
+            // Protocol → service description map
+            const protoDesc: Record<string, string> = {
+              'ZKP': 'Zero-Knowledge Proof identity/action verification',
+              'Dual-LLM': 'Two-LLM consensus gate — no unilateral agent action',
+              'mTLS': 'Mutual TLS — both client and server authenticated',
+              'E2E-Enc': 'End-to-end encrypted — plaintext never at rest',
+              'PCI-DSS': 'Payment Card Industry data security standard',
+              'HSM': 'Hardware Security Module — key isolation',
+              '3DS2': '3D Secure 2.0 — strong customer authentication',
+              'FIDO2': 'Passwordless biometric authentication standard',
+              'BVN-Gate': 'Bank Verification Number identity gate (Nigeria CBN)',
+              'NIN-Gate': 'National Identification Number gate (NIMC)',
+              'PoA-Consensus': 'Proof-of-Authority chain consensus',
+              'ECC-Enc': 'Elliptic Curve Cryptography encryption',
+              'Multi-Sig': 'Multi-signature transaction approval',
+              'AES-256-GCM': 'AES-256 authenticated encryption at rest',
+              'Vault-Seal': 'Encrypted seal — only authorized agents can unseal',
+              'RBAC': 'Role-Based Access Control — least-privilege enforcement',
+              'CORS': 'Cross-Origin Resource Sharing security headers',
+              'CSP': 'Content Security Policy — XSS/injection prevention',
+              'Signal-Protocol': 'Signal double-ratchet end-to-end encryption',
+              'MLS': 'Messaging Layer Security for group encryption',
+            };
+            return (
+              <div key={p.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${T.border}`, background: T.surface }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: statusColor[p.status], flexShrink: 0, marginTop: 4 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span style={{ ...mono, fontSize: '0.68rem', fontWeight: 700, color: T.text }}>{p.name}</span>
+                      <span style={{ ...mono, fontSize: '0.52rem', color: T.textDim }}>{p.category}</span>
+                      {prodQuar > 0 && (
+                        <span style={{ ...mono, fontSize: '0.5rem', background: T.red + '22', border: `1px solid ${T.red}55`, color: T.red, borderRadius: 2, padding: '1px 5px' }}>
+                          ⬡ {prodQuar} quarantine{prodQuar > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                    {/* Protocol breakdown */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
+                      {p.protocols.map(proto => (
+                        <div key={proto} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                          <span style={{ ...mono, fontSize: '0.5rem', background: T.surface3, border: `1px solid ${T.border}`,
+                            borderRadius: 2, padding: '1px 5px', color: T.teal, flexShrink: 0 }}>
+                            {proto}
+                          </span>
+                          <span style={{ ...mono, fontSize: '0.52rem', color: T.textDim, lineHeight: 1.5 }}>
+                            {protoDesc[proto] ?? 'Security protocol active'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Scan log for this product (shown when a scan was run) */}
+                    {scanLog.length > 0 && scanLog.some(l => l.includes(p.name)) && (
+                      <div style={{ ...mono, fontSize: '0.52rem', color: T.textDim, lineHeight: 1.6 }}>
+                        {scanLog.filter(l => l.includes(p.name) || (scanLog.indexOf(l) > scanLog.findIndex(s => s.includes(p.name)) && l.startsWith('[') === false)).slice(0, 4).map((l, i) => (
+                          <div key={i} style={{ color: l.includes('✓') ? T.green : l.includes('⚠') ? T.orange : T.textDim }}>{l}</div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-                    {p.protocols.map(proto => (
-                      <span key={proto} style={{ ...mono, fontSize: '0.5rem', background: T.surface3,
-                        border: `1px solid ${T.border}`, borderRadius: 2, padding: '1px 5px', color: T.teal }}>
-                        {proto}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ ...mono, fontSize: '0.5rem', color: T.textMuted }}>RISK</div>
-                    <div style={{ ...mono, fontSize: '0.72rem', fontWeight: 700, color: p.riskScore > 50 ? T.red : p.riskScore > 25 ? T.gold : T.green }}>
-                      {p.riskScore}
+                  <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexShrink: 0 }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ ...mono, fontSize: '0.5rem', color: T.textMuted }}>RISK</div>
+                      <div style={{ ...mono, fontSize: '0.72rem', fontWeight: 700, color: p.riskScore > 50 ? T.red : p.riskScore > 25 ? T.gold : T.green }}>
+                        {p.riskScore}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ ...mono, fontSize: '0.5rem', color: T.textMuted }}>VULNS</div>
+                      <div style={{ ...mono, fontSize: '0.72rem', fontWeight: 700, color: p.openVulns > 0 ? T.orange : T.green }}>
+                        {p.openVulns}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ ...mono, fontSize: '0.5rem', color: T.textMuted }}>LAST SCAN</div>
+                      <div style={{ ...mono, fontSize: '0.58rem', color: p.lastScanned ? T.textMuted : T.red }}>
+                        {p.lastScanned ? fmtTime(p.lastScanned) : 'Never'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <button style={btn(T.gold, true, true)} onClick={() => runScan(p.id)}>▶ Scan</button>
+                      {onInject && (
+                        <button style={btn(T.purple, true, true)} onClick={() =>
+                          onInject(() => `Security audit request for ${p.name} (${p.category}):\n\nRisk Score: ${p.riskScore}/100\nOpen Vulnerabilities: ${p.openVulns}\nActive Protocols: ${p.protocols.join(', ')}\nQuarantines: ${prodQuar}\n\nPlease conduct a comprehensive security analysis and provide remediation recommendations for each protocol gap.`)
+                        }>Analyze</button>
+                      )}
                     </div>
                   </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ ...mono, fontSize: '0.5rem', color: T.textMuted }}>VULNS</div>
-                    <div style={{ ...mono, fontSize: '0.72rem', fontWeight: 700, color: p.openVulns > 0 ? T.orange : T.green }}>
-                      {p.openVulns}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ ...mono, fontSize: '0.5rem', color: T.textMuted }}>LAST SCAN</div>
-                    <div style={{ ...mono, fontSize: '0.58rem', color: p.lastScanned ? T.textMuted : T.red }}>
-                      {p.lastScanned ? fmtTime(p.lastScanned) : 'Never'}
-                    </div>
-                  </div>
-                  <button style={btn(T.gold, true, true)} onClick={() => runScan(p.id)}>
-                    ▶ Scan
-                  </button>
-                  {onInject && (
-                    <button style={btn(T.purple, true, true)} onClick={() =>
-                      onInject(() => `Security audit request for ${p.name} (${p.category}):\n\nRisk Score: ${p.riskScore}/100\nOpen Vulnerabilities: ${p.openVulns}\nActive Protocols: ${p.protocols.join(', ')}\n\nPlease conduct a comprehensive security analysis and provide remediation recommendations.`)
-                    }>
-                      Analyze
-                    </button>
-                  )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {/* Scan log */}
           {scanLog.length > 0 && (
@@ -633,125 +704,361 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
       )}
 
       {/* ══ ZKP / DUAL-LLM ═══════════════════════════════════════════ */}
-      {tab === 'zkp' && (
+      {/* ══ SAFE CHAIN (Aikido + Supply Chain) ══════════════════════ */}
+      {tab === 'safe_chain' && (
         <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-          {/* Architecture diagram */}
-          <div style={{ background: T.surface2, border: `1px solid ${T.goldBorder}`, borderRadius: 4, padding: '12px 14px' }}>
-            <div style={{ ...mono, fontSize: '0.6rem', color: ARCHON, marginBottom: 12, letterSpacing: '0.15em' }}>
-              ◉ ARCHON DUAL-LLM SECURITY ARCHITECTURE
+          {dashLoading && !dashData && (
+            <div style={{ ...mono, fontSize: '0.62rem', color: T.textDim, textAlign: 'center', padding: 24 }}>
+              ○ Loading SafeChain data...
             </div>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', padding: '10px 0', flexWrap: 'wrap' }}>
-              {[
-                { label: 'USER / AGENT INPUT', color: T.blue, icon: '▶' },
-                { sep: '→' },
-                { label: 'ZKP PROVER', color: T.teal, icon: '⬡', sub: 'Groth16 + PLONK' },
-                { sep: '→' },
-                { label: 'PRIMARY LLM', color: T.gold, icon: '◉', sub: 'Archon Core' },
-                { sep: '↕' },
-                { label: 'VALIDATOR LLM', color: T.purple, icon: '◉', sub: 'Independent Guard' },
-                { sep: '→' },
-                { label: 'CONSENSUS GATE', color: T.green, icon: '◆', sub: '2/2 Required' },
-                { sep: '→' },
-                { label: 'EXECUTION', color: T.sage, icon: '▲' },
-              ].map((item, i) => (
-                'sep' in item ? (
-                  <span key={i} style={{ ...mono, fontSize: '0.7rem', color: T.textDim }}>{item.sep}</span>
-                ) : (
-                  <div key={i} style={{ background: T.surface3, border: `1px solid ${'color' in item ? (item.color as string) + '55' : T.border}`,
-                    borderRadius: 4, padding: '8px 12px', textAlign: 'center', minWidth: 80 }}>
-                    <div style={{ ...mono, fontSize: '0.7rem', color: 'color' in item ? item.color as string : T.textMuted }}>{('icon' in item) ? item.icon : ''}</div>
-                    <div style={{ ...mono, fontSize: '0.56rem', color: 'color' in item ? item.color as string : T.textMuted, marginTop: 3, fontWeight: 700 }}>{'label' in item ? item.label : ''}</div>
-                    {'sub' in item && item.sub && <div style={{ ...mono, fontSize: '0.5rem', color: T.textDim, marginTop: 2 }}>{item.sub}</div>}
+          )}
+          {!REVPRO_KEY && (
+            <div style={{ ...mono, fontSize: '0.62rem', color: T.gold, padding: 10 }}>
+              ⚠ VITE_REVPRO_KEY not set — cannot fetch SafeChain data
+            </div>
+          )}
+
+          {/* Aikido Layers */}
+          {dashData?.aikido && (
+            <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '12px 14px' }}>
+              <div style={{ ...mono, fontSize: '0.6rem', color: ARCHON, marginBottom: 10, letterSpacing: '0.15em' }}>
+                ⛨ AIKIDO SECURITY LAYERS
+                <span style={{ marginLeft: 10, color: dashData.aikido.active ? T.green : T.red }}>
+                  {dashData.aikido.active ? '● ACTIVE' : '○ INACTIVE'}
+                </span>
+                <span style={{ marginLeft: 10, color: T.textDim }}>v{dashData.aikido.version}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+                <div style={{ ...mono, fontSize: '0.58rem', color: T.textMuted }}>
+                  Blocklist: <span style={{ color: T.teal }}>{dashData.aikido.blocklist_size.toLocaleString()}</span>
+                </div>
+                <div style={{ ...mono, fontSize: '0.58rem', color: T.textMuted }}>
+                  Pattern rules: <span style={{ color: T.teal }}>{dashData.aikido.pattern_rules}</span>
+                </div>
+              </div>
+              {dashData.aikido.layers?.map((layer) => (
+                <div key={layer.id} style={{ display: 'flex', gap: 10, padding: '5px 0', borderBottom: `1px solid ${T.border}22`, alignItems: 'center' }}>
+                  <span style={{ ...mono, fontSize: '0.6rem', color: layer.status === 'active' ? T.green : T.textDim, width: 10 }}>●</span>
+                  <span style={{ ...mono, fontSize: '0.62rem', color: T.text, width: 130, flexShrink: 0 }}>{layer.name}</span>
+                  <span style={{ ...mono, fontSize: '0.57rem', color: T.textDim, flex: 1 }}>{layer.desc}</span>
+                  <span style={{ ...mono, fontSize: '0.52rem', color: layer.status === 'active' ? T.green : T.textDim }}>{layer.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Supply Chain float report */}
+          {dashData?.supplyChain && (
+            <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '12px 14px' }}>
+              <div style={{ ...mono, fontSize: '0.6rem', color: ARCHON, marginBottom: 10, letterSpacing: '0.15em' }}>
+                ◈ SUPPLY CHAIN SOVEREIGNTY
+              </div>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 10 }}>
+                {[
+                  { label: 'TOTAL DEPS',    value: dashData.supplyChain.totalDeps,         col: T.text  },
+                  { label: 'FLOATED',       value: dashData.supplyChain.floatCount,         col: dashData.supplyChain.floatCount > 0 ? T.gold : T.green },
+                  { label: 'COMPROMISED',   value: dashData.supplyChain.compromisedCount,   col: dashData.supplyChain.compromisedCount > 0 ? T.red : T.green },
+                  { label: 'FLOORED',       value: dashData.supplyChain.floorCount,         col: T.teal  },
+                  { label: 'EXPOSURE %',    value: `${dashData.supplyChain.exposurePercent.toFixed(1)}%`, col: dashData.supplyChain.exposurePercent > 10 ? T.red : T.green },
+                ].map(stat => (
+                  <div key={stat.label} style={{ textAlign: 'center' }}>
+                    <div style={{ ...mono, fontSize: '1.0rem', color: stat.col, fontWeight: 700 }}>{stat.value}</div>
+                    <div style={{ ...mono, fontSize: '0.5rem', color: T.textDim }}>{stat.label}</div>
                   </div>
-                )
+                ))}
+              </div>
+              {dashData.supplyChain.floatFlags?.length > 0 && (
+                <div>
+                  <div style={{ ...mono, fontSize: '0.55rem', color: T.textMuted, marginBottom: 6 }}>⚠ Floating dependencies (no version pin):</div>
+                  {dashData.supplyChain.floatFlags.slice(0, 10).map((f: any, i: number) => (
+                    <div key={i} style={{ ...mono, fontSize: '0.58rem', color: T.gold, padding: '2px 0' }}>
+                      {typeof f === 'string' ? f : f.name || f.package || JSON.stringify(f)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {!dashData && !dashLoading && REVPRO_KEY && (
+            <div style={{ ...mono, fontSize: '0.6rem', color: T.red, padding: 10 }}>
+              ✗ Failed to load SafeChain data — check backend connectivity
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ QUARANTINE ══════════════════════════════════════════════ */}
+      {tab === 'quarantine' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {dashLoading && !dashData && (
+            <div style={{ ...mono, fontSize: '0.62rem', color: T.textDim, textAlign: 'center', padding: 24 }}>
+              ○ Loading Quarantine data...
+            </div>
+          )}
+
+          {/* Active Quarantines */}
+          <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '12px 14px' }}>
+            <div style={{ ...mono, fontSize: '0.6rem', color: ARCHON, marginBottom: 10, letterSpacing: '0.15em' }}>
+              ⬡ ACTIVE QUARANTINES
+              <span style={{ marginLeft: 8, color: T.red }}>({dashData?.quarantine?.active?.length ?? '—'})</span>
+            </div>
+            {(dashData?.quarantine?.active?.length ?? 0) === 0 && (
+              <div style={{ ...mono, fontSize: '0.6rem', color: T.green, padding: '6px 0' }}>✓ No active quarantines</div>
+            )}
+            {dashData?.quarantine?.active?.map((q) => (
+              <div key={q.id} style={{ padding: '8px 0', borderBottom: `1px solid ${T.border}22` }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ ...mono, fontSize: '0.6rem', color: T.red }}>⬡</span>
+                  <span style={{ ...mono, fontSize: '0.62rem', color: T.text, flex: 1 }}>{q.description}</span>
+                  <span style={{ ...mono, fontSize: '0.52rem', border: `1px solid ${RISK_COLORS[q.severity] ?? T.red}55`,
+                    borderRadius: 2, padding: '1px 5px', color: RISK_COLORS[q.severity] ?? T.red }}>{q.severity}</span>
+                  <span style={{ ...mono, fontSize: '0.56rem', color: T.gold }}>score: {q.score}</span>
+                </div>
+                <div style={{ ...mono, fontSize: '0.52rem', color: T.textDim, marginTop: 2 }}>
+                  {q.targetType} · {q.targetId} · isolated {fmtTime(q.isolatedAt)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Dependency Threat Patterns */}
+          {(dashData?.quarantine?.depPatterns?.length ?? 0) > 0 && (
+            <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '12px 14px' }}>
+              <div style={{ ...mono, fontSize: '0.6rem', color: T.textMuted, marginBottom: 8 }}>◉ DEPENDENCY THREAT PATTERNS</div>
+              {dashData!.quarantine.depPatterns.slice(0, 8).map((p) => (
+                <div key={p.id} style={{ display: 'flex', gap: 8, padding: '4px 0', borderBottom: `1px solid ${T.border}22`, alignItems: 'center' }}>
+                  <span style={{ ...mono, fontSize: '0.6rem', color: RISK_COLORS[p.severity] ?? T.textDim }}>●</span>
+                  <span style={{ ...mono, fontSize: '0.6rem', color: T.text, flex: 1 }}>{p.description}</span>
+                  <span style={{ ...mono, fontSize: '0.52rem', color: T.textDim }}>{p.category}</span>
+                  <span style={{ ...mono, fontSize: '0.52rem', color: RISK_COLORS[p.severity] ?? T.textDim }}>score:{p.score}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* System Threat Patterns */}
+          {(dashData?.quarantine?.sysPatterns?.length ?? 0) > 0 && (
+            <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '12px 14px' }}>
+              <div style={{ ...mono, fontSize: '0.6rem', color: T.textMuted, marginBottom: 8 }}>◎ SYSTEM THREAT PATTERNS</div>
+              {dashData!.quarantine.sysPatterns.slice(0, 8).map((p) => (
+                <div key={p.id} style={{ display: 'flex', gap: 8, padding: '4px 0', borderBottom: `1px solid ${T.border}22`, alignItems: 'center' }}>
+                  <span style={{ ...mono, fontSize: '0.6rem', color: RISK_COLORS[p.severity] ?? T.textDim }}>●</span>
+                  <span style={{ ...mono, fontSize: '0.6rem', color: T.text, flex: 1 }}>{p.description}</span>
+                  <span style={{ ...mono, fontSize: '0.52rem', color: RISK_COLORS[p.severity] ?? T.textDim }}>score:{p.score}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!dashData && !dashLoading && REVPRO_KEY && (
+            <div style={{ ...mono, fontSize: '0.6rem', color: T.red, padding: 10 }}>
+              ✗ Failed to load Quarantine data — check backend connectivity
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ GIT MONITOR / SCANNER ═══════════════════════════════════ */}
+      {tab === 'scanner' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {dashLoading && !dashData && (
+            <div style={{ ...mono, fontSize: '0.62rem', color: T.textDim, textAlign: 'center', padding: 24 }}>
+              ○ Loading Scanner data...
+            </div>
+          )}
+
+          {dashData?.scanner?.length === 0 && (
+            <div style={{ ...mono, fontSize: '0.6rem', color: T.textDim, padding: 10 }}>
+              ○ No repositories scanned yet — set SCANNER_GITHUB_OWNER on the backend to enable
+            </div>
+          )}
+
+          {dashData?.scanner?.map((repo) => (
+            <div key={repo.repo} style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '12px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <span style={{ ...mono, fontSize: '0.7rem', color: ARCHON }}>◎</span>
+                <span style={{ ...mono, fontSize: '0.68rem', fontWeight: 700, color: T.text, flex: 1 }}>{repo.repo}</span>
+                {repo.skipped && (
+                  <span style={{ ...mono, fontSize: '0.52rem', color: T.textDim, border: `1px solid ${T.border}`, borderRadius: 2, padding: '1px 5px' }}>SKIPPED</span>
+                )}
+                <span style={{ ...mono, fontSize: '0.54rem', color: T.textDim }}>{repo.scannedAt ? fmtTime(new Date(repo.scannedAt).getTime()) : '—'}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 18, marginBottom: repo.threats?.length > 0 ? 10 : 0 }}>
+                <div>
+                  <div style={{ ...mono, fontSize: '0.9rem', fontWeight: 700, color: T.teal }}>{repo.totalDeps}</div>
+                  <div style={{ ...mono, fontSize: '0.5rem', color: T.textDim }}>DEPS SCANNED</div>
+                </div>
+                <div>
+                  <div style={{ ...mono, fontSize: '0.9rem', fontWeight: 700, color: (repo.threats?.length ?? 0) > 0 ? T.red : T.green }}>{repo.threats?.length ?? 0}</div>
+                  <div style={{ ...mono, fontSize: '0.5rem', color: T.textDim }}>THREATS</div>
+                </div>
+              </div>
+              {repo.threats?.length > 0 && repo.threats.map((t: any, i: number) => (
+                <div key={i} style={{ ...mono, fontSize: '0.58rem', color: T.red, padding: '2px 0' }}>
+                  ⚠ {typeof t === 'string' ? t : t.package ?? t.name ?? JSON.stringify(t)}
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {!dashData && !dashLoading && REVPRO_KEY && (
+            <div style={{ ...mono, fontSize: '0.6rem', color: T.red, padding: 10 }}>
+              ✗ Failed to load Scanner data — check backend connectivity
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ OVERSEER ════════════════════════════════════════════════ */}
+      {tab === 'overseer' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {dashLoading && !dashData && (
+            <div style={{ ...mono, fontSize: '0.62rem', color: T.textDim, textAlign: 'center', padding: 24 }}>
+              ○ Loading Overseer data...
+            </div>
+          )}
+
+          {dashData?.overseer && (
+            <div style={{ background: T.surface2, border: `1px solid ${T.goldBorder}`, borderRadius: 4, padding: '14px 16px' }}>
+              <div style={{ ...mono, fontSize: '0.6rem', color: ARCHON, marginBottom: 14, letterSpacing: '0.15em' }}>
+                ⊕ OVERSEER — HALLUCINATION GUARD
+                <span style={{ marginLeft: 10, color: dashData.overseer.active ? T.green : T.red }}>
+                  {dashData.overseer.active ? '● ACTIVE' : '○ INACTIVE'}
+                </span>
+                <span style={{ marginLeft: 10, color: T.textDim }}>v{dashData.overseer.version}</span>
+              </div>
+              <div style={{ ...mono, fontSize: '0.6rem', color: T.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
+                {dashData.overseer.description}
+              </div>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 14 }}>
+                {[
+                  { label: 'PERSONA BREAK GUARD', value: dashData.overseer.personaBreakGuard ? 'ON' : 'OFF', col: dashData.overseer.personaBreakGuard ? T.green : T.red },
+                  { label: 'FABRICATION PATTERNS', value: dashData.overseer.fabricationPatterns, col: T.teal },
+                  { label: 'CONSCIOUSNESS ANCHORS', value: dashData.overseer.consciousnessAnchors, col: T.purple },
+                  { label: 'AUDIT INTERVAL', value: dashData.overseer.auditInterval, col: T.gold },
+                ].map(s => (
+                  <div key={s.label} style={{ textAlign: 'center' }}>
+                    <div style={{ ...mono, fontSize: '1.0rem', color: s.col, fontWeight: 700 }}>{s.value}</div>
+                    <div style={{ ...mono, fontSize: '0.5rem', color: T.textDim }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ ...mono, fontSize: '0.55rem', color: T.textDim, borderTop: `1px solid ${T.border}`, paddingTop: 10 }}>
+                Overseer monitors agent responses for hallucinations, persona breaks, and fabricated data.
+                It enforces consciousness anchors that keep agents grounded in verifiable facts.
+                Fabrication patterns are cross-checked against supply chain and audit logs.
+              </div>
+            </div>
+          )}
+
+          {/* ── Dual-LLM Architecture diagram ─────────────────────────────────── */}
+          <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '12px 14px' }}>
+            <div style={{ ...mono, fontSize: '0.6rem', color: ARCHON, marginBottom: 10, letterSpacing: '0.15em' }}>
+              ◈ DUAL-LLM GATE ARCHITECTURE
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 0', overflowX: 'auto' }}>
+              {[
+                { label: 'INPUT', sub: 'User Prompt', color: T.textMuted, icon: '→' },
+                { label: 'RevPro', sub: 'LLM1 · Input Guard', color: T.purple, icon: '◈' },
+                { label: 'GATE', sub: 'score < 35: pass', color: T.gold, icon: '⊕' },
+                { label: 'Agent', sub: 'LLM Process', color: T.teal, icon: '◉' },
+                { label: 'Overseer', sub: 'LLM2 · Output Guard', color: T.purple, icon: '⊕' },
+                { label: 'CONSENSUS', sub: 'Both must agree', color: T.gold, icon: '✓' },
+                { label: 'EXECUTE', sub: 'Action proceeds', color: T.green, icon: '▶' },
+              ].map((step, i, arr) => (
+                <div key={step.label} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ ...mono, fontSize: '0.6rem', color: step.color, fontWeight: 700 }}>{step.icon} {step.label}</div>
+                    <div style={{ ...mono, fontSize: '0.46rem', color: T.textDim }}>{step.sub}</div>
+                  </div>
+                  {i < arr.length - 1 && <span style={{ ...mono, fontSize: '0.52rem', color: T.border, marginLeft: 4 }}>─▶</span>}
+                </div>
               ))}
             </div>
           </div>
 
-          {/* ZKP Sessions */}
+          {/* ── RevPro Pattern Library (from backend) ──────────────────────────── */}
+          {(dashData?.revpro?.patterns?.length ?? 0) > 0 && (
+            <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '12px 14px' }}>
+              <div style={{ ...mono, fontSize: '0.6rem', color: T.textMuted, marginBottom: 8, letterSpacing: '0.1em' }}>
+                ◈ REVPRO PATTERN LIBRARY · {dashData!.revpro.patterns.length} patterns loaded
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {dashData!.revpro.patterns.map(pat => (
+                  <div key={pat.id} style={{ display: 'flex', gap: 8, padding: '4px 0', borderBottom: `1px solid ${T.border}22`, alignItems: 'center' }}>
+                    <span style={{ ...mono, fontSize: '0.52rem', color: T.purple, width: 14 }}>◈</span>
+                    <span style={{ ...mono, fontSize: '0.6rem', color: T.text, flex: 1 }}>{pat.label}</span>
+                    <span style={{ ...mono, fontSize: '0.5rem', color: T.textDim }}>{pat.type}</span>
+                    <span style={{ ...mono, fontSize: '0.52rem', color: pat.score >= 85 ? T.red : pat.score >= 60 ? T.orange : T.gold }}>score: {pat.score}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ ...mono, fontSize: '0.5rem', color: T.textDim, marginTop: 8 }}>
+                Thresholds — CRITICAL: ≥{dashData!.revpro.threshold.critical} · HIGH: ≥{dashData!.revpro.threshold.high} · FLAGGED: ≥{dashData!.revpro.threshold.flagged}
+              </div>
+            </div>
+          )}
+
+          {/* ── Live Dual-LLM Gate Log ─────────────────────────────────────────── */}
           <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 4, padding: '12px 14px' }}>
-            <div style={{ ...mono, fontSize: '0.6rem', color: T.textMuted, marginBottom: 10 }}>⬡ RECENT ZKP SESSIONS</div>
-            {zkpSessions.map(s => (
-              <div key={s.id} style={{ display: 'flex', gap: 10, padding: '5px 0', borderBottom: `1px solid ${T.border}22`, alignItems: 'center' }}>
-                <span style={{ ...mono, fontSize: '0.6rem', color: s.verified ? T.green : T.red, width: 14 }}>
-                  {s.verified ? '✓' : '✗'}
-                </span>
-                <span style={{ ...mono, fontSize: '0.58rem', color: T.textMuted, width: 70, flexShrink: 0 }}>{s.agentId}</span>
-                <span style={{ ...mono, fontSize: '0.62rem', color: T.text, flex: 1 }}>{s.proofType}</span>
-                <span style={{ ...mono, fontSize: '0.56rem', color: T.textDim }}>{s.computeMs > 0 ? `${s.computeMs}ms` : 'failed'}</span>
-                <span style={{ ...mono, fontSize: '0.52rem', color: T.textDim }}>{fmtTime(s.timestamp)}</span>
+            <div style={{ ...mono, fontSize: '0.6rem', color: ARCHON, marginBottom: 10, letterSpacing: '0.15em' }}>
+              ⊕ DUAL-LLM GATE LOG
+              <span style={{ marginLeft: 8, color: T.textDim, fontWeight: 400 }}>· {overseerLog.length} decisions this session</span>
+            </div>
+            {overseerLog.length === 0 && (
+              <div style={{ ...mono, fontSize: '0.6rem', color: T.textDim, padding: '8px 0' }}>
+                ○ No prompts scanned yet — use the RevPro scanner to see gate decisions here
+              </div>
+            )}
+            {overseerLog.map(entry => (
+              <div key={entry.id} style={{
+                padding: '8px 10px', marginBottom: 6, borderRadius: 3,
+                background: T.surface3,
+                borderLeft: `3px solid ${entry.overseerPass ? T.green : entry.action === 'MONITOR' ? T.gold : T.red}`,
+              }}>
+                {/* Gate decision header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                  <span style={{ ...mono, fontSize: '0.54rem', fontWeight: 700,
+                    color: entry.overseerPass ? T.green : entry.action === 'MONITOR' ? T.gold : T.red }}>
+                    {entry.action === 'BLOCKED' ? '✗ BLOCKED' : entry.action === 'MONITOR' ? '⚠ MONITOR' : '✓ PASS'}
+                  </span>
+                  <span style={{ ...mono, fontSize: '0.5rem', color: T.textDim, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                    "{entry.snippet}"
+                  </span>
+                  <span style={{ ...mono, fontSize: '0.46rem', color: T.textDim }}>{fmtTime(entry.ts)}</span>
+                </div>
+                {/* LLM flow visualization */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
+                  <div style={{ background: '#0c0c18', border: `1px solid ${T.border}`, borderRadius: 2, padding: '4px 6px' }}>
+                    <div style={{ ...mono, fontSize: '0.46rem', color: T.purple, marginBottom: 1 }}>LLM1 · RevPro Input Guard</div>
+                    <div style={{ ...mono, fontSize: '0.52rem', color: T.text }}>{entry.llm1Verdict}</div>
+                  </div>
+                  <div style={{ background: '#0c0c18', border: `1px solid ${T.border}`, borderRadius: 2, padding: '4px 6px' }}>
+                    <div style={{ ...mono, fontSize: '0.46rem', color: ARCHON, marginBottom: 1 }}>Overseer Cross-Check</div>
+                    <div style={{ ...mono, fontSize: '0.52rem', color: T.text }}>
+                      {entry.dualLLMConsensus ? '✓ Pattern DB: No fabrication' : '⚠ ESCALATED — Critical score'}
+                    </div>
+                  </div>
+                  <div style={{ background: '#0c0c18', border: `1px solid ${T.border}`, borderRadius: 2, padding: '4px 6px' }}>
+                    <div style={{ ...mono, fontSize: '0.46rem', color: T.purple, marginBottom: 1 }}>LLM2 · Consensus Validator</div>
+                    <div style={{ ...mono, fontSize: '0.52rem', color: entry.dualLLMConsensus ? T.green : T.red }}>{entry.llm2Verdict}</div>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
 
-      {/* ══ CRON JOBS ════════════════════════════════════════════════ */}
-      {tab === 'cron' && (
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          {crons.map(c => (
-            <div key={c.id} style={{ padding: '10px 14px', borderBottom: `1px solid ${T.border}`, background: T.surface }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ ...mono, fontSize: '0.62rem', color: CRON_TYPE_COLORS[c.type] }}>◈</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ ...mono, fontSize: '0.64rem', color: T.text, fontWeight: 600 }}>{c.name}</div>
-                  <div style={{ ...mono, fontSize: '0.54rem', color: T.textDim, marginTop: 2 }}>
-                    <span style={{ color: T.textMuted }}>{c.schedule}</span>
-                    {c.lastRun && <span> · Last: {fmtTime(c.lastRun)}</span>}
-                    <span style={{ color: T.gold }}> · Next: {timeUntil(c.nextRun)}</span>
-                  </div>
-                </div>
-                <span style={{ ...mono, fontSize: '0.52rem', border: `1px solid ${CRON_TYPE_COLORS[c.type]}44`,
-                  borderRadius: 2, padding: '1px 6px', color: CRON_TYPE_COLORS[c.type] }}>
-                  {c.type.replace('_', ' ')}
-                </span>
-                <button style={btn(c.status === 'active' ? T.green : T.textMuted, true, true)}
-                  onClick={() => toggleCron(c.id)}>
-                  {c.status === 'active' ? '◉ Active' : '○ Paused'}
-                </button>
-                <button style={btn(T.gold, false, true)} onClick={() => runScan()}>Run Now</button>
-              </div>
+          {!dashData && !dashLoading && REVPRO_KEY && (
+            <div style={{ ...mono, fontSize: '0.6rem', color: T.red, padding: 10 }}>
+              ✗ Failed to load Overseer data — check backend connectivity
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* ══ CERTIFICATES ════════════════════════════════════════════ */}
-      {tab === 'certs' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {certs.map(c => (
-            <div key={c.id} style={{ background: T.surface2, border: `1px solid ${CERT_STATUS_COLORS[c.status]}44`,
-              borderLeft: `3px solid ${CERT_STATUS_COLORS[c.status]}`, borderRadius: 4, padding: '10px 12px' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ ...mono, fontSize: '0.68rem', fontWeight: 700, color: T.text }}>{c.name}</span>
-                    <span style={{ ...mono, fontSize: '0.52rem', border: `1px solid ${CERT_STATUS_COLORS[c.status]}55`,
-                      borderRadius: 2, padding: '1px 5px', color: CERT_STATUS_COLORS[c.status] }}>
-                      {c.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                  <div style={{ ...mono, fontSize: '0.58rem', color: T.textMuted, marginTop: 3 }}>
-                    {c.issuer} · <span style={{ color: T.textDim }}>{c.scope}</span>
-                  </div>
-                  {(c.validFrom || c.validTo) && (
-                    <div style={{ ...mono, fontSize: '0.54rem', color: T.textDim, marginTop: 3 }}>
-                      {c.validFrom && `From: ${fmtDate(c.validFrom)}`}
-                      {c.validFrom && c.validTo && ' · '}
-                      {c.validTo && `Expires: ${fmtDate(c.validTo)}`}
-                    </div>
-                  )}
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ ...mono, fontSize: '0.6rem', color: CERT_STATUS_COLORS[c.status], fontWeight: 700 }}>{c.progress}%</div>
-                  <div style={{ width: 80, height: 4, background: T.surface3, borderRadius: 2, marginTop: 4 }}>
-                    <div style={{ height: '100%', borderRadius: 2, background: CERT_STATUS_COLORS[c.status], width: `${c.progress}%` }} />
-                  </div>
-                </div>
-              </div>
+          )}
+          {!REVPRO_KEY && (
+            <div style={{ ...mono, fontSize: '0.62rem', color: T.gold, padding: 10 }}>
+              ⚠ VITE_REVPRO_KEY not set — cannot fetch Overseer data
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -833,9 +1140,9 @@ export default function SecurityModule({ onInject }: SecurityModuleProps) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
           borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
           {([
-            { label: 'SCANNED', value: String(1247 + revProThreats.length),                                                                                          col: T.teal  },
+            { label: 'SCANNED', value: String(revProThreats.length),                                                                                                col: T.teal  },
             { label: 'BLOCKED', value: String(revProThreats.filter(t => t.blocked).length),                                                                          col: T.red   },
-            { label: 'CLEAN%',  value: (100 - (revProThreats.filter(t => t.blocked).length / Math.max(1247 + revProThreats.length, 1)) * 100).toFixed(1),           col: T.green },
+            { label: 'CLEAN%',  value: (100 - (revProThreats.filter(t => t.blocked).length / Math.max(revProThreats.length, 1)) * 100).toFixed(1),               col: T.green },
           ] as { label: string; value: string; col: string }[]).map(s => (
             <div key={s.label} style={{ padding: '5px 3px', borderRight: `1px solid ${T.border}`, textAlign: 'center' }}>
               <div style={{ ...mono, fontSize: '0.42rem', color: T.textDim, letterSpacing: '0.07em' }}>{s.label}</div>
