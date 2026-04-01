@@ -132,9 +132,10 @@ export class ArchonTunnel {
 
     this.socket = io(`${base}${ns}`, {
       path,
-      // polling first — more reliable through Railway's HTTP proxy
-      // upgrades to websocket automatically after handshake
-      transports:          ['polling'],  // polling only — Railway proxy blocks WS upgrades
+      // WebSocket first — Fly.io supports WS upgrades natively via [http_service].
+      // Falls back to polling only if WS upgrade is rejected.
+      // (Old comment "polling only" was for Railway which blocked upgrades — no longer applicable)
+      transports:          ['websocket', 'polling'],
       auth:                { key },
       reconnection:        true,
       reconnectionDelay:   3000,
